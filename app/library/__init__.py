@@ -1,0 +1,2 @@
+"""Media library management module."""
+

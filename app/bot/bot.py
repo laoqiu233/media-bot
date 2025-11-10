@@ -3,7 +3,6 @@ import logging
 import os
 from typing import Dict, List, Optional
 from enum import Enum
-from dotenv import load_dotenv
 
 from telegram import (
     Update,
@@ -20,9 +19,6 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
-
-# Загрузка переменных окружения
-load_dotenv()
 
 # Настройка логирования
 logging.basicConfig(
