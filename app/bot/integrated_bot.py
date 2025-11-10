@@ -5,7 +5,7 @@ import logging
 import os
 from pathlib import Path
 
-from telegram.ext import Application, MessageHandler, CallbackQueryHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 
 from app.config import load_config
 from app.library.manager import LibraryManager
@@ -174,10 +174,15 @@ def run_integrated_bot():
             application = Application.builder().token(config.telegram.bot_token).build()
 
             # Register handlers
-            # Handle all text messages (creates/shows active screen)
+            # Handle /start separately (don't delete it to avoid Telegram resending)
+            application.add_handler(
+                CommandHandler("start", handlers.handle_start_command)
+            )
+            
+            # Handle all other text messages including commands
             application.add_handler(
                 MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
+                    filters.TEXT,  # Accept all text including commands
                     handlers.handle_text_message
                 )
             )

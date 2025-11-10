@@ -1,12 +1,112 @@
 """Screen manager for handling navigation and active messages."""
 
 import logging
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
 logger = logging.getLogger(__name__)
+
+
+class Session:
+    """Represents a chat session with screen state."""
+
+    def __init__(self, chat_id: int):
+        """Initialize a new session.
+
+        Args:
+            chat_id: Chat ID for this session
+        """
+        self.chat_id = chat_id
+        self.message_id: Optional[int] = None
+        self.screen: str = "main_menu"
+        self.state: Dict[str, Any] = {}
+        self.history: List[str] = []
+
+    def set_message_id(self, message_id: int) -> None:
+        """Set the active message ID.
+
+        Args:
+            message_id: Message ID
+        """
+        self.message_id = message_id
+
+    def get_message_id(self) -> Optional[int]:
+        """Get the active message ID.
+
+        Returns:
+            Message ID or None
+        """
+        return self.message_id
+
+    def set_screen(self, screen_name: str) -> None:
+        """Set the current screen.
+
+        Args:
+            screen_name: Screen name
+        """
+        self.screen = screen_name
+
+    def get_screen(self) -> str:
+        """Get the current screen name.
+
+        Returns:
+            Screen name
+        """
+        return self.screen
+
+    def set_state(self, state: Dict[str, Any]) -> None:
+        """Set the screen state.
+
+        Args:
+            state: Screen state dictionary
+        """
+        self.state = state
+
+    def get_state(self) -> Dict[str, Any]:
+        """Get the screen state.
+
+        Returns:
+            Screen state dictionary
+        """
+        return self.state
+
+    def clear_state(self) -> None:
+        """Clear the screen state."""
+        self.state = {}
+
+    def add_to_history(self, screen_name: str) -> None:
+        """Add a screen to navigation history.
+
+        Args:
+            screen_name: Screen name to add
+        """
+        # Don't add duplicates at the end
+        if not self.history or self.history[-1] != screen_name:
+            self.history.append(screen_name)
+
+    def pop_history(self) -> Optional[str]:
+        """Pop the last screen from history.
+
+        Returns:
+            Previous screen name or None if history is empty
+        """
+        if self.history:
+            return self.history.pop()
+        return None
+
+    def get_history(self) -> List[str]:
+        """Get the navigation history.
+
+        Returns:
+            List of screen names
+        """
+        return self.history
+
+    def clear_history(self) -> None:
+        """Clear the navigation history."""
+        self.history = []
 
 
 class ScreenManager:
@@ -15,7 +115,7 @@ class ScreenManager:
     def __init__(self):
         """Initialize the screen manager."""
         self.screens: Dict[str, "Screen"] = {}
-        self.chat_sessions: Dict[int, Dict[str, Any]] = {}
+        self.sessions: Dict[int, Session] = {}
 
     def register_screen(self, screen: "Screen") -> None:
         """Register a screen.
@@ -38,23 +138,18 @@ class ScreenManager:
         """
         return self.screens.get(screen_name)
 
-    def _get_session(self, chat_id: int) -> Dict[str, Any]:
+    def _get_session(self, chat_id: int) -> Session:
         """Get or create a session for a chat.
 
         Args:
             chat_id: Chat ID
 
         Returns:
-            Session dictionary
+            Session object
         """
-        if chat_id not in self.chat_sessions:
-            self.chat_sessions[chat_id] = {
-                "message_id": None,
-                "screen": "main_menu",
-                "state": {},
-                "history": [],
-            }
-        return self.chat_sessions[chat_id]
+        if chat_id not in self.sessions:
+            self.sessions[chat_id] = Session(chat_id)
+        return self.sessions[chat_id]
 
     def get_active_screen(self, chat_id: int) -> Optional["Screen"]:
         """Get the active screen for a chat.
@@ -66,7 +161,7 @@ class ScreenManager:
             Active screen instance or None
         """
         session = self._get_session(chat_id)
-        screen_name = session["screen"]
+        screen_name = session.get_screen()
         return self.get_screen(screen_name)
 
     def get_screen_state(self, chat_id: int) -> Dict[str, Any]:
@@ -79,7 +174,7 @@ class ScreenManager:
             Screen state dictionary
         """
         session = self._get_session(chat_id)
-        return session.get("state", {})
+        return session.get_state()
 
     def set_screen_state(self, chat_id: int, state: Dict[str, Any]) -> None:
         """Set the state for the active screen.
@@ -89,7 +184,7 @@ class ScreenManager:
             state: Screen state dictionary
         """
         session = self._get_session(chat_id)
-        session["state"] = state
+        session.set_state(state)
 
     async def navigate_to(
         self,
@@ -107,21 +202,20 @@ class ScreenManager:
             **kwargs: Additional context for the target screen
         """
         session = self._get_session(chat_id)
-        current_screen_name = session["screen"]
+        current_screen_name = session.get_screen()
         current_screen = self.get_screen(current_screen_name)
 
         # Add to history if requested
         if add_to_history and current_screen_name != screen_name:
-            if current_screen_name not in session["history"][-1:]:
-                session["history"].append(current_screen_name)
+            session.add_to_history(current_screen_name)
 
         # Call on_exit for current screen
         if current_screen:
             await current_screen.on_exit(chat_id)
 
         # Update session
-        session["screen"] = screen_name
-        session["state"] = {}  # Reset state for new screen
+        session.set_screen(screen_name)
+        session.clear_state()  # Reset state for new screen
 
         # Get new screen
         new_screen = self.get_screen(screen_name)
@@ -144,10 +238,9 @@ class ScreenManager:
             chat_id: Chat ID
         """
         session = self._get_session(chat_id)
-        history = session["history"]
+        previous_screen = session.pop_history()
 
-        if history:
-            previous_screen = history.pop()
+        if previous_screen:
             await self.navigate_to(chat_id, previous_screen, add_to_history=False)
         else:
             # No history, go to main menu
@@ -160,7 +253,7 @@ class ScreenManager:
             chat_id: Chat ID
         """
         session = self._get_session(chat_id)
-        message_id = session.get("message_id")
+        message_id = session.get_message_id()
         screen = self.get_active_screen(chat_id)
 
         if not screen:
@@ -168,13 +261,12 @@ class ScreenManager:
             return
 
         # Render the screen
-        text, keyboard = await screen.render(chat_id, session["state"])
+        text, keyboard = await screen.render(chat_id, session.get_state())
 
         # Get bot instance from context
         # This will be set when we update the message from a callback or message handler
-        # For now, we store the rendered content and update later
-        session["_rendered_text"] = text
-        session["_rendered_keyboard"] = keyboard
+        # For now, we store the rendered content (we don't actually need to store it)
+        # since we render on-demand in create_or_update_active_message
 
     async def create_or_update_active_message(
         self,
@@ -197,9 +289,9 @@ class ScreenManager:
             return
 
         # Render the screen
-        text, keyboard = await screen.render(chat_id, session["state"])
+        text, keyboard = await screen.render(chat_id, session.get_state())
 
-        message_id = session.get("message_id")
+        message_id = session.get_message_id()
 
         # Try to update existing message first
         if message_id:
@@ -209,6 +301,7 @@ class ScreenManager:
                     message_id=message_id,
                     text=text,
                     reply_markup=keyboard,
+                    parse_mode="Markdown",
                 )
                 logger.debug(f"Updated message {message_id} for chat {chat_id}")
                 return
@@ -224,8 +317,9 @@ class ScreenManager:
                     message = await update.callback_query.edit_message_text(
                         text=text,
                         reply_markup=keyboard,
+                        parse_mode="Markdown",
                     )
-                    session["message_id"] = message.message_id
+                    session.set_message_id(message.message_id)
                     logger.info(
                         f"Created active message {message.message_id} for chat {chat_id}"
                     )
@@ -238,8 +332,9 @@ class ScreenManager:
                 chat_id=chat_id,
                 text=text,
                 reply_markup=keyboard,
+                parse_mode="Markdown",
             )
-            session["message_id"] = message.message_id
+            session.set_message_id(message.message_id)
             logger.info(
                 f"Created active message {message.message_id} for chat {chat_id}"
             )
@@ -291,7 +386,7 @@ class ScreenManager:
         Args:
             chat_id: Chat ID
         """
-        if chat_id in self.chat_sessions:
-            del self.chat_sessions[chat_id]
+        if chat_id in self.sessions:
+            del self.sessions[chat_id]
             logger.info(f"Cleared session for chat {chat_id}")
 

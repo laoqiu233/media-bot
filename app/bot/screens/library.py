@@ -78,6 +78,10 @@ class LibraryScreen(Screen):
 
             text = "📚 *My Library*\n\n"
             
+            # Show scan result if present
+            if state.get("scan_result"):
+                text += f"{state['scan_result']}\n\n"
+            
             if not movies and not series:
                 text += "Your library is empty.\nSearch and download content to get started!"
                 keyboard = [
@@ -313,44 +317,47 @@ class LibraryScreen(Screen):
         elif action == "main":
             state["view"] = "main"
             state["page"] = 0
+            state.pop("scan_result", None)  # Clear scan result when returning to main
             self.set_state(chat_id, state)
-            await self.refresh(chat_id)
+            # screen_manager auto-refreshes after callback
 
         elif action == "movies":
             state["view"] = "movies"
             state["page"] = 0
+            state.pop("scan_result", None)  # Clear scan result
             self.set_state(chat_id, state)
-            await self.refresh(chat_id)
+            # screen_manager auto-refreshes after callback
 
         elif action == "series":
             state["view"] = "series"
             state["page"] = 0
+            state.pop("scan_result", None)  # Clear scan result
             self.set_state(chat_id, state)
-            await self.refresh(chat_id)
+            # screen_manager auto-refreshes after callback
 
         elif action == "movies_prev":
             page = state.get("page", 0)
             state["page"] = max(0, page - 1)
             self.set_state(chat_id, state)
-            await self.refresh(chat_id)
+            # screen_manager auto-refreshes after callback
 
         elif action == "movies_next":
             page = state.get("page", 0)
             state["page"] = page + 1
             self.set_state(chat_id, state)
-            await self.refresh(chat_id)
+            # screen_manager auto-refreshes after callback
 
         elif action == "series_prev":
             page = state.get("page", 0)
             state["page"] = max(0, page - 1)
             self.set_state(chat_id, state)
-            await self.refresh(chat_id)
+            # screen_manager auto-refreshes after callback
 
         elif action == "series_next":
             page = state.get("page", 0)
             state["page"] = page + 1
             self.set_state(chat_id, state)
-            await self.refresh(chat_id)
+            # screen_manager auto-refreshes after callback
 
         elif action == "scan":
             await self._scan_library(update, context, chat_id)
@@ -378,20 +385,22 @@ class LibraryScreen(Screen):
             chat_id: Chat ID
         """
         try:
+            # Show scanning status in the callback (no alert popup)
             await update.callback_query.answer("Scanning library...")
             
+            # Perform the scan
             movies_count, series_count = await self.library.scan_library()
             
-            await update.callback_query.answer(
-                f"✅ Library scanned!\nMovies: {movies_count}\nSeries: {series_count}",
-                show_alert=True
-            )
+            # Update state with scan result (screen_manager will auto-refresh)
+            state = self.get_state(chat_id)
+            state["scan_result"] = f"✅ Scanned: {movies_count} movies, {series_count} series"
+            self.set_state(chat_id, state)
             
-            # Refresh view
-            await self.refresh(chat_id)
+            # Don't call refresh() - screen_manager does it automatically after callback
 
         except Exception as e:
             logger.error(f"Error scanning library: {e}")
+            # Show error in callback answer
             await update.callback_query.answer(
                 "Error scanning library",
                 show_alert=True

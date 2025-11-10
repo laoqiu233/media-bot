@@ -212,32 +212,32 @@ class PlayerScreen(Screen):
 
         elif action == "refresh":
             await update.callback_query.answer("Refreshing...")
-            await self.refresh(chat_id)
+            # screen_manager auto-refreshes after callback
 
         elif action == "pause":
             success = await self.player.pause()
             await update.callback_query.answer("⏸ Paused" if success else "Failed")
-            await self.refresh(chat_id)
+            # screen_manager auto-refreshes after callback
 
         elif action == "resume":
             success = await self.player.resume()
             await update.callback_query.answer("▶️ Resumed" if success else "Failed")
-            await self.refresh(chat_id)
+            # screen_manager auto-refreshes after callback
 
         elif action == "stop":
             success = await self.player.stop()
             await update.callback_query.answer("⏹ Stopped" if success else "Failed")
-            await self.refresh(chat_id)
+            # screen_manager auto-refreshes after callback
 
         elif action == "vol_up":
             success = await self.player.volume_up()
             await update.callback_query.answer("🔊 Volume up" if success else "Failed")
-            await self.refresh(chat_id)
+            # screen_manager auto-refreshes after callback
 
         elif action == "vol_down":
             success = await self.player.volume_down()
             await update.callback_query.answer("🔉 Volume down" if success else "Failed")
-            await self.refresh(chat_id)
+            # screen_manager auto-refreshes after callback
 
         elif action == "seek":
             try:
@@ -248,7 +248,7 @@ class PlayerScreen(Screen):
                 await update.callback_query.answer(
                     f"{direction} Seeked {abs_seconds}s" if success else "Failed"
                 )
-                await self.refresh(chat_id)
+                # screen_manager auto-refreshes after callback
             except ValueError:
                 await update.callback_query.answer("Invalid seek value", show_alert=True)
 

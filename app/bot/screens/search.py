@@ -46,21 +46,36 @@ class SearchScreen(Screen):
         results = state.get("results", [])
         page = state.get("page", 0)
         query = state.get("query", "")
-        waiting_for_input = state.get("waiting_for_input", False)
+        no_results = state.get("no_results", False)
+        error = state.get("error")
 
-        # If waiting for search input
-        if waiting_for_input and not results:
+        # If there was an error
+        if error:
             text = (
                 "🔍 *Search for Content*\n\n"
-                "Type the name of a movie or TV series you want to find.\n\n"
-                "I'll search across multiple torrent sources and show you the best results."
+                f"❌ Error: {error}\n\n"
+                "Type a search term to try again."
             )
             keyboard = [[InlineKeyboardButton("« Back to Menu", callback_data="search:back:")]]
             return text, InlineKeyboardMarkup(keyboard)
 
-        # If no results yet
+        # If no results found after search
+        if no_results and query:
+            text = (
+                "🔍 *Search for Content*\n\n"
+                f"No results found for: _{query}_\n\n"
+                "Try typing a different search term."
+            )
+            keyboard = [[InlineKeyboardButton("« Back to Menu", callback_data="search:back:")]]
+            return text, InlineKeyboardMarkup(keyboard)
+
+        # If no results yet (first time on search screen)
         if not results:
-            text = "🔍 *Search for Content*\n\nType anything to start searching..."
+            text = (
+                "🔍 *Search for Content*\n\n"
+                "Type the name of a movie or TV series to find.\n\n"
+                "I'll search across multiple torrent sources."
+            )
             keyboard = [[InlineKeyboardButton("« Back to Menu", callback_data="search:back:")]]
             return text, InlineKeyboardMarkup(keyboard)
 
@@ -73,23 +88,25 @@ class SearchScreen(Screen):
         text = f"🔍 *Search Results for:* _{query}_\n\n"
         text += f"Found {len(results)} results (page {page + 1}/{(len(results) - 1) // items_per_page + 1})\n\n"
 
+        # Show results with details in text
+        for i, result in enumerate(page_results):
+            text += f"{i + 1}. *{result.title[:50]}{'...' if len(result.title) > 50 else ''}*\n"
+            text += f"   📁 {result.quality} • {result.size} • 🌱 {result.seeders} seeders\n\n"
+
+        text += "💡 _Type anything to search again_"
+
         keyboard = []
 
-        # Add result buttons
+        # Add result buttons - simple numbered buttons
         for i, result in enumerate(page_results):
             actual_idx = start_idx + i
-            button_text = f"{result.title[:40]}{'...' if len(result.title) > 40 else ''}"
-            details = f"{result.quality} • {result.size} • S:{result.seeders}"
+            button_text = f"{i + 1}. {result.title[:35]}"
+            if len(button_text) > 45:
+                button_text = button_text[:42] + "..."
             
             keyboard.append([
                 InlineKeyboardButton(
-                    f"📦 {button_text}",
-                    callback_data=f"search:select:{actual_idx}"
-                )
-            ])
-            keyboard.append([
-                InlineKeyboardButton(
-                    f"   {details}",
+                    button_text,
                     callback_data=f"search:download:{actual_idx}"
                 )
             ])
@@ -110,9 +127,6 @@ class SearchScreen(Screen):
 
         # Bottom buttons
         keyboard.append([
-            InlineKeyboardButton("🔍 New Search", callback_data="search:new:")
-        ])
-        keyboard.append([
             InlineKeyboardButton("« Back to Menu", callback_data="search:back:")
         ])
 
@@ -125,8 +139,14 @@ class SearchScreen(Screen):
             chat_id: Chat ID
             **kwargs: Additional context
         """
-        # Set state to wait for input
-        self.set_state(chat_id, {"waiting_for_input": True})
+        # Clear any previous state - always ready for new search
+        self.set_state(chat_id, {
+            "results": [],
+            "query": "",
+            "page": 0,
+            "no_results": False,
+            "error": None,
+        })
 
     async def handle_callback(
         self,
@@ -149,15 +169,11 @@ class SearchScreen(Screen):
         if action == "back":
             await self.navigate_to(chat_id, "main_menu", add_to_history=False)
 
-        elif action == "new":
-            self.set_state(chat_id, {"waiting_for_input": True})
-            await self.refresh(chat_id)
-
         elif action == "prev_page":
             page = state.get("page", 0)
             state["page"] = max(0, page - 1)
             self.set_state(chat_id, state)
-            await self.refresh(chat_id)
+            # screen_manager auto-refreshes after callback
 
         elif action == "next_page":
             page = state.get("page", 0)
@@ -166,7 +182,7 @@ class SearchScreen(Screen):
             max_page = (len(results) - 1) // items_per_page
             state["page"] = min(max_page, page + 1)
             self.set_state(chat_id, state)
-            await self.refresh(chat_id)
+            # screen_manager auto-refreshes after callback
 
         elif action == "download":
             await self._start_download(update, context, chat_id, params)
@@ -176,55 +192,65 @@ class SearchScreen(Screen):
     ) -> None:
         """Handle text input for search query.
 
+        Always performs a new search when user types on search screen.
+
         Args:
             update: Telegram update
             context: Bot context
             text: User's text input
         """
         chat_id = update.effective_chat.id
-        state = self.get_state(chat_id)
 
-        # Only process if waiting for input
-        if not state.get("waiting_for_input"):
-            return
+        # Delete user's message for cleaner UX
+        try:
+            await update.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete user message: {e}")
 
         # Perform search
         try:
-            # Show searching message
-            await update.message.reply_text(f"🔍 Searching for: _{text}_...")
-
             results = await self.searcher.search(text, limit=20)
 
             if not results:
-                state.update({
-                    "waiting_for_input": True,
+                self.set_state(chat_id, {
                     "results": [],
                     "query": text,
+                    "no_results": True,
+                    "page": 0,
+                    "error": None,
                 })
-                self.set_state(chat_id, state)
-                await update.message.reply_text(
-                    f"No results found for '{text}'. Try a different search term."
+                # Update active message to show "no results"
+                await self.screen_manager.create_or_update_active_message(
+                    update, context, chat_id
                 )
                 return
 
             # Store results
-            state.update({
-                "waiting_for_input": False,
+            self.set_state(chat_id, {
                 "results": results,
                 "query": text,
                 "page": 0,
+                "no_results": False,
+                "error": None,
             })
-            self.set_state(chat_id, state)
 
-            # Show results
+            # Show results - update active message
             await self.screen_manager.create_or_update_active_message(
                 update, context, chat_id
             )
 
         except Exception as e:
             logger.error(f"Error searching: {e}")
-            await update.message.reply_text(
-                "An error occurred while searching. Please try again."
+            self.set_state(chat_id, {
+                "results": [],
+                "query": text,
+                "error": str(e),
+                "no_results": False,
+                "page": 0,
+            })
+            # Update active message to show error
+            await self.screen_manager.create_or_update_active_message(
+                update, context, chat_id
             )
 
     async def _start_download(

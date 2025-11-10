@@ -227,7 +227,7 @@ class DownloadsScreen(Screen):
 
         elif action == "refresh":
             await update.callback_query.answer("Refreshing...")
-            await self.refresh(chat_id)
+            # screen_manager auto-refreshes after callback
 
         elif action == "pause":
             await self._pause_download(update, context, params)

@@ -131,7 +131,7 @@ class TVScreen(Screen):
 
         elif action == "refresh":
             await update.callback_query.answer("Refreshing...")
-            await self.refresh(chat_id)
+            # screen_manager auto-refreshes after callback
 
         elif action == "on":
             await self._tv_on(update, context)
@@ -174,9 +174,7 @@ class TVScreen(Screen):
                     show_alert=True
                 )
             
-            # Refresh status
-            chat_id = update.callback_query.message.chat_id
-            await self.refresh(chat_id)
+            # screen_manager auto-refreshes after callback
 
         except Exception as e:
             logger.error(f"Error turning TV on: {e}")
@@ -205,9 +203,7 @@ class TVScreen(Screen):
                     show_alert=True
                 )
             
-            # Refresh status
-            chat_id = update.callback_query.message.chat_id
-            await self.refresh(chat_id)
+            # screen_manager auto-refreshes after callback
 
         except Exception as e:
             logger.error(f"Error turning TV off: {e}")

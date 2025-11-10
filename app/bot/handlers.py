@@ -42,6 +42,31 @@ class BotHandlers:
             return True
         return self.auth_manager.is_authorized(update)
 
+    async def handle_start_command(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Handle /start command.
+
+        Don't delete the message to avoid Telegram client resending it.
+
+        Args:
+            update: Telegram update
+            context: Bot context
+        """
+        # Check authorization
+        if not self._is_authorized(update):
+            # Silently ignore unauthorized users
+            return
+
+        chat_id = update.effective_chat.id
+
+        # Don't delete /start message - just show the active screen
+        await self.screen_manager.create_or_update_active_message(
+            update, context, chat_id
+        )
+
     async def handle_text_message(
         self,
         update: Update,
@@ -73,7 +98,13 @@ class BotHandlers:
                 await active_screen.handle_text_input(update, context, text)
                 return
 
-        # Otherwise, create/show the active screen (main menu)
+        # Delete user's message for cleaner single-message UX
+        try:
+            await update.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete user message: {e}")
+
+        # Create/show the active screen (main menu)
         await self.screen_manager.create_or_update_active_message(
             update, context, chat_id
         )
