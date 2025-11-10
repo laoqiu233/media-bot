@@ -279,8 +279,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str):
-    user_id = update.effective_user.id
-
     if not query.strip():
         await update.message.reply_text("Пожалуйста, введите название фильма:")
         return
