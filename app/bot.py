@@ -164,30 +164,40 @@ def get_movies_keyboard(movies: List[Movie], page: int = 0, search_query: str = 
     end_idx = start_idx + items_per_page
     paginated_movies = movies[start_idx:end_idx]
 
+    # Создаем кнопки для фильмов с учетом поискового запроса
     for i, movie in enumerate(paginated_movies):
         actual_index = start_idx + i
         button_text = f"{movie.title} ({movie.year}) - {movie.quality} - {movie.size}"
-        callback_data = f"download_{actual_index}"
+
+        # Добавляем поисковый запрос в callback_data если он есть
+        if search_query:
+            callback_data = f"download_{actual_index}_{search_query}"
+        else:
+            callback_data = f"download_{actual_index}"
+
         keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
 
-    # Кнопки навигации
+    # Кнопки навигации с учетом поискового запроса
     nav_buttons = []
     if page > 0:
-        nav_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"page_{page - 1}"))
+        if search_query:
+            callback_data = f"page_{page - 1}_{search_query}"
+        else:
+            callback_data = f"page_{page - 1}"
+        nav_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=callback_data))
+
     if end_idx < len(movies):
-        nav_buttons.append(InlineKeyboardButton("Вперед ➡️", callback_data=f"page_{page + 1}"))
+        if search_query:
+            callback_data = f"page_{page + 1}_{search_query}"
+        else:
+            callback_data = f"page_{page + 1}"
+        nav_buttons.append(InlineKeyboardButton("Вперед ➡️", callback_data=callback_data))
 
     if nav_buttons:
         keyboard.append(nav_buttons)
 
+    # Кнопка возврата в меню
     keyboard.append([InlineKeyboardButton("↩️ Назад в меню", callback_data="back_to_menu")])
-
-    # Сохраняем поисковый запрос для пагинации
-    if search_query:
-        for button_row in keyboard:
-            for button in button_row:
-                if hasattr(button, 'callback_data') and button.callback_data:
-                    button.callback_data += f"_{search_query}"
 
     return InlineKeyboardMarkup(keyboard)
 
@@ -375,20 +385,37 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("page_"):
         parts = data.split("_")
         page = int(parts[1])
-        movies = context.user_data.get('search_results', [])
-        search_query = context.user_data.get('search_query', "")
+
+        # Извлекаем поисковый запрос если он есть
+        search_query = "_".join(parts[2:]) if len(parts) > 2 else ""
+
+        # Если есть поисковый запрос, выполняем поиск заново
+        if search_query:
+            movies = await movie_bot.search_movies(search_query)
+            context.user_data['search_results'] = movies
+            context.user_data['search_query'] = search_query
+        else:
+            movies = context.user_data.get('search_results', [])
 
         context.user_data['current_page'] = page
 
         await query.edit_message_text(
-            f"По запросу '{search_query}' найдено фильмов: {len(movies)}\nВыберите вариант для загрузки:",
+            f"Найдено фильмов: {len(movies)}\nВыберите вариант для загрузки:",
             reply_markup=get_movies_keyboard(movies, page, search_query)
         )
 
     elif data.startswith("download_"):
         parts = data.split("_")
         movie_index = int(parts[1])
-        movies = context.user_data.get('search_results', [])
+
+        # Извлекаем поисковый запрос если он есть
+        search_query = "_".join(parts[2:]) if len(parts) > 2 else ""
+
+        # Если есть поисковый запрос, получаем результаты из него
+        if search_query:
+            movies = await movie_bot.search_movies(search_query)
+        else:
+            movies = context.user_data.get('search_results', [])
 
         if 0 <= movie_index < len(movies):
             selected_movie = movies[movie_index]
@@ -410,7 +437,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📺 {result}",
             reply_markup=get_player_keyboard()
         )
-
 
 def run_bot():
     TOKEN = os.getenv('BOT_TOKEN')
