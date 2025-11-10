@@ -34,42 +34,43 @@ class TorrentDownloader:
         self.download_path = download_path
         self.download_path.mkdir(parents=True, exist_ok=True)
 
-        # Initialize libtorrent session
-        self.session = lt.session()
-        self.session.listen_on(6881, 6891)
-
-        # Configure session
-        settings = {
-            "user_agent": "MediaBot/1.0",
-            "listen_interfaces": "0.0.0.0:6881",
-            "enable_dht": True,
-            "enable_lsd": True,
-            "enable_upnp": True,
-            "enable_natpmp": True,
-        }
-
-        # Apply settings based on libtorrent version
+        # Initialize libtorrent session with settings
         try:
-            # For libtorrent 2.x
-            settings_pack = lt.settings_pack()
-            for key, value in settings.items():
-                if hasattr(settings_pack, key):
-                    setattr(settings_pack, key, value)
-            self.session.apply_settings(settings_pack)
-        except AttributeError:
-            # For libtorrent 1.x
-            for key, value in settings.items():
-                self.session.set_settings({key: value})
+            # Try the newer API (libtorrent 2.x)
+            settings = lt.session_params()
+            settings.settings.user_agent = "MediaBot/1.0"
+            self.session = lt.session(settings)
+        except (AttributeError, TypeError):
+            # Fall back to older API (libtorrent 1.x)
+            self.session = lt.session()
+            try:
+                self.session.listen_on(6881, 6891)
+            except AttributeError:
+                # Even older API
+                pass
 
         # Add DHT routers
-        self.session.add_dht_router("router.bittorrent.com", 6881)
-        self.session.add_dht_router("router.utorrent.com", 6881)
-        self.session.add_dht_router("dht.transmissionbt.com", 6881)
+        try:
+            self.session.add_dht_router("router.bittorrent.com", 6881)
+            self.session.add_dht_router("router.utorrent.com", 6881)
+            self.session.add_dht_router("dht.transmissionbt.com", 6881)
+        except AttributeError:
+            # DHT router methods not available in this version
+            logger.warning("DHT router configuration not available in this libtorrent version")
 
         # Storage for active downloads
         self.downloads: Dict[str, Dict] = {}
         self._monitor_task: Optional[asyncio.Task] = None
+        self._on_download_complete = None  # Callback for completed downloads
 
+    def set_completion_callback(self, callback):
+        """Set callback to be called when a download completes.
+        
+        Args:
+            callback: Async function(task_id, download_info)
+        """
+        self._on_download_complete = callback
+    
     def start_monitoring(self):
         """Start monitoring downloads."""
         if self._monitor_task is None or self._monitor_task.done():
@@ -157,10 +158,19 @@ class TorrentDownloader:
 
                     # Check if completed
                     if status.is_seeding or status.progress >= 1.0:
-                        logger.info(
-                            f"Download completed: {download_info['name']} (ID: {task_id})"
-                        )
-                        download_info["completed_at"] = datetime.now()
+                        # Only process once
+                        if "completed_at" not in download_info:
+                            logger.info(
+                                f"Download completed: {download_info['name']} (ID: {task_id})"
+                            )
+                            download_info["completed_at"] = datetime.now()
+                            
+                            # Trigger callback if set
+                            if hasattr(self, '_on_download_complete'):
+                                try:
+                                    await self._on_download_complete(task_id, download_info)
+                                except Exception as e:
+                                    logger.error(f"Error in download complete callback: {e}")
 
             except asyncio.CancelledError:
                 break

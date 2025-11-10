@@ -431,8 +431,21 @@ class BotHandlers:
                 movie = await self.library.get_movie(movie_id)
 
                 if movie and movie.file_path:
+                    # Ensure file_path is a Path object
+                    file_path = Path(movie.file_path) if isinstance(movie.file_path, str) else movie.file_path
+                    
+                    if not file_path.exists():
+                        await query.edit_message_text(
+                            f"❌ File not found: {movie.title}\n"
+                            f"Path: {file_path}"
+                        )
+                        logger.error(f"Movie file does not exist: {file_path}")
+                        return
+                    
                     await query.edit_message_text(f"▶️ Playing: {movie.title}...")
-                    success = await self.player.play(movie.file_path)
+                    logger.info(f"Attempting to play: {file_path}")
+                    
+                    success = await self.player.play(file_path)
 
                     if success:
                         await query.edit_message_text(
@@ -441,7 +454,8 @@ class BotHandlers:
                         )
                     else:
                         await query.edit_message_text(
-                            f"❌ Failed to play: {movie.title}"
+                            f"❌ Failed to play: {movie.title}\n"
+                            f"Check logs for details."
                         )
                 else:
                     await query.edit_message_text("Movie file not found.")

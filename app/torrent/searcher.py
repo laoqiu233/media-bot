@@ -38,8 +38,7 @@ class TorrentSearcher:
 
         # Search multiple sources in parallel
         tasks = [
-            self._search_1337x(query, limit),
-            self._search_piratebay(query, limit),
+            self._search_yts(query, limit),
         ]
 
         results = []
@@ -60,8 +59,8 @@ class TorrentSearcher:
         results.sort(key=lambda x: x.seeders, reverse=True)
         return results[:limit]
 
-    async def _search_1337x(self, query: str, limit: int) -> List[TorrentSearchResult]:
-        """Search 1337x.to.
+    async def _search_yts(self, query: str, limit: int) -> List[TorrentSearchResult]:
+        """Search YTS.mx using their API.
 
         Args:
             query: Search query
@@ -72,7 +71,7 @@ class TorrentSearcher:
         """
         results = []
         encoded_query = quote(query)
-        url = f"https://1337x.to/search/{encoded_query}/1/"
+        url = f"https://yts.mx/api/v2/list_movies.json?query_term={encoded_query}&limit={limit}"
 
         try:
             async with aiohttp.ClientSession(
@@ -80,99 +79,80 @@ class TorrentSearcher:
             ) as session:
                 async with session.get(url) as response:
                     if response.status != 200:
-                        logger.warning(f"1337x returned status {response.status}")
+                        logger.warning(f"YTS returned status {response.status}")
                         return results
 
-                    html = await response.text()
-                    soup = BeautifulSoup(html, "lxml")
-
-                    # Find torrent table
-                    table = soup.find("table", class_="table-list")
-                    if not table:
-                        logger.warning("Could not find torrent table on 1337x")
+                    data = await response.json()
+                    
+                    # Check if we got valid data
+                    if data.get("status") != "ok":
+                        logger.warning(f"YTS API returned error status")
+                        return results
+                    
+                    movies = data.get("data", {}).get("movies", [])
+                    if not movies:
+                        logger.info("No results found on YTS")
                         return results
 
-                    rows = table.find("tbody").find_all("tr")
-
-                    for row in rows[:limit]:
+                    for movie in movies:
                         try:
-                            # Extract data from row
-                            name_cell = row.find("td", class_="coll-1")
-                            seeds_cell = row.find("td", class_="coll-2")
-                            leeches_cell = row.find("td", class_="coll-3")
-                            size_cell = row.find("td", class_="coll-4")
-
-                            if not all([name_cell, seeds_cell, size_cell]):
-                                continue
-
-                            title_link = name_cell.find("a", href=True)
-                            if not title_link:
-                                continue
-
-                            title = title_link.text.strip()
-                            detail_url = "https://1337x.to" + title_link["href"]
-
-                            # Get magnet link from detail page
-                            magnet = await self._get_1337x_magnet(
-                                session, detail_url
-                            )
-                            if not magnet:
-                                continue
-
-                            seeders = int(seeds_cell.text.strip() or "0")
-                            leechers = int(leeches_cell.text.strip() or "0")
-                            size = size_cell.text.strip()
-
-                            result = TorrentSearchResult(
-                                title=title,
-                                magnet_link=magnet,
-                                size=size,
-                                seeders=seeders,
-                                leechers=leechers,
-                                source="1337x",
-                                quality=self._detect_quality(title),
-                            )
-                            results.append(result)
+                            title_base = movie.get("title", "Unknown")
+                            year = movie.get("year", "")
+                            
+                            # YTS provides multiple torrents per movie (different qualities)
+                            torrents = movie.get("torrents", [])
+                            
+                            for torrent in torrents:
+                                quality = torrent.get("quality", "Unknown")
+                                size = torrent.get("size", "Unknown")
+                                seeds = torrent.get("seeds", 0)
+                                peers = torrent.get("peers", 0)
+                                hash_code = torrent.get("hash", "")
+                                
+                                # Construct magnet link
+                                if not hash_code:
+                                    continue
+                                    
+                                title = f"{title_base} ({year}) [{quality}]"
+                                magnet = f"magnet:?xt=urn:btih:{hash_code}&dn={quote(title)}&tr=udp://open.demonii.com:1337/announce&tr=udp://tracker.openbittorrent.com:80&tr=udp://tracker.coppersurfer.tk:6969&tr=udp://glotorrents.pw:6969/announce&tr=udp://tracker.opentrackr.org:1337/announce&tr=udp://torrent.gresille.org:80/announce&tr=udp://p4p.arenabg.com:1337&tr=udp://tracker.leechers-paradise.org:6969"
+                                
+                                result = TorrentSearchResult(
+                                    title=title,
+                                    magnet_link=magnet,
+                                    size=size,
+                                    seeders=seeds,
+                                    leechers=peers,
+                                    source="YTS",
+                                    quality=self._map_yts_quality(quality),
+                                )
+                                results.append(result)
 
                         except Exception as e:
-                            logger.debug(f"Error parsing 1337x row: {e}")
+                            logger.debug(f"Error parsing YTS movie: {e}")
                             continue
 
         except Exception as e:
-            logger.error(f"Error searching 1337x: {e}")
+            logger.error(f"Error searching YTS: {e}")
 
-        logger.info(f"Found {len(results)} results from 1337x")
+        logger.info(f"Found {len(results)} results from YTS")
         return results
-
-    async def _get_1337x_magnet(
-        self, session: aiohttp.ClientSession, url: str
-    ) -> str | None:
-        """Get magnet link from 1337x detail page.
+    
+    def _map_yts_quality(self, yts_quality: str) -> VideoQuality:
+        """Map YTS quality string to VideoQuality enum.
 
         Args:
-            session: aiohttp session
-            url: Detail page URL
+            yts_quality: YTS quality string (e.g., "720p", "1080p", "2160p")
 
         Returns:
-            Magnet link or None
+            Video quality enum
         """
-        try:
-            async with session.get(url) as response:
-                if response.status != 200:
-                    return None
-
-                html = await response.text()
-                soup = BeautifulSoup(html, "lxml")
-
-                # Find magnet link
-                magnet_link = soup.find("a", href=re.compile(r"^magnet:\?"))
-                if magnet_link:
-                    return magnet_link["href"]
-
-        except Exception as e:
-            logger.debug(f"Error getting 1337x magnet: {e}")
-
-        return None
+        quality_map = {
+            "2160p": VideoQuality.UHD_4K,
+            "1080p": VideoQuality.HD_1080,
+            "720p": VideoQuality.HD_720,
+            "480p": VideoQuality.SD,
+        }
+        return quality_map.get(yts_quality, VideoQuality.UNKNOWN)
 
     async def _search_piratebay(
         self, query: str, limit: int

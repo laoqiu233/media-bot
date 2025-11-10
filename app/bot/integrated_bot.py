@@ -38,6 +38,21 @@ async def initialize_components():
     # Initialize torrent system
     torrent_searcher = TorrentSearcher()
     torrent_downloader = get_downloader(config.media_library.download_path)
+    
+    # Set up callback to import completed downloads to library
+    async def on_download_complete(task_id: str, download_info: dict):
+        """Import completed download to library."""
+        logger.info(f"Processing completed download: {download_info['name']}")
+        download_path = torrent_downloader.get_download_path(task_id)
+        if download_path and download_path.exists():
+            await library_manager.import_from_download(
+                download_path=download_path,
+                torrent_name=download_info['name']
+            )
+        else:
+            logger.warning(f"Download path not found for task {task_id}")
+    
+    torrent_downloader.set_completion_callback(on_download_complete)
     torrent_downloader.start_monitoring()
     logger.info("Torrent system initialized")
 
@@ -90,6 +105,11 @@ def run_integrated_bot():
 
     async def main():
         """Main async function."""
+        # Initialize cleanup variables
+        downloader = None
+        player = None
+        scheduler = None
+        
         try:
             # Initialize components
             config, handlers, downloader, player, scheduler = (
@@ -118,8 +138,20 @@ def run_integrated_bot():
             logger.info("🚀 Media Bot is starting...")
             logger.info("Press Ctrl+C to stop")
 
-            # Run the bot
-            await application.run_polling()
+            # Initialize and start the bot
+            await application.initialize()
+            await application.start()
+            await application.updater.start_polling()
+            
+            # Keep the bot running
+            try:
+                # Wait indefinitely until interrupted
+                await asyncio.Event().wait()
+            finally:
+                # Stop the updater
+                await application.updater.stop()
+                await application.stop()
+                await application.shutdown()
 
         except KeyboardInterrupt:
             logger.info("Received stop signal")

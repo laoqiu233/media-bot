@@ -111,22 +111,52 @@ class MPVController:
             True if playback started successfully
         """
         if not self._player:
-            logger.error("MPV player not initialized")
+            logger.error("MPV player not initialized. Call initialize() first.")
             return False
 
+        # Convert to Path if string
+        if isinstance(file_path, str):
+            file_path = Path(file_path)
+        
         if not file_path.exists():
             logger.error(f"File not found: {file_path}")
             return False
 
         try:
             async with self._lock:
-                self._player.play(str(file_path))
+                logger.info(f"Starting playback of: {file_path}")
+                logger.info(f"File size: {file_path.stat().st_size / (1024*1024):.2f} MB")
+                
+                # Load and play the file
+                self._player.loadfile(str(file_path))
                 self._current_file = file_path
+                
+                # Ensure playback starts (unpause if paused)
+                self._player.pause = False
                 self._is_playing = True
-                logger.info(f"Started playback: {file_path}")
+                
+                # Give MPV a moment to start
+                await asyncio.sleep(0.5)
+                
+                # Verify playback actually started
+                try:
+                    if self._player.time_pos is not None or self._player.duration is not None:
+                        logger.info(f"✅ Playback started successfully: {file_path.name}")
+                        logger.info(f"   Duration: {self._player.duration}s")
+                    else:
+                        logger.warning(f"⚠️  File loaded but playback status unknown")
+                        logger.warning("   This is normal on systems without video output (e.g., macOS)")
+                        logger.warning("   On Raspberry Pi with HDMI, playback should work correctly")
+                except Exception as e:
+                    logger.debug(f"Could not read playback status: {e}")
+                
                 return True
+        except AttributeError as e:
+            logger.error(f"MPV player method not available: {e}")
+            logger.error("Make sure python-mpv is properly installed")
+            return False
         except Exception as e:
-            logger.error(f"Error starting playback: {e}")
+            logger.error(f"Error starting playback: {e}", exc_info=True)
             return False
 
     async def pause(self) -> bool:

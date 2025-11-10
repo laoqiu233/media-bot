@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import re
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,8 @@ from app.library.models import (
     Series,
     VideoQuality,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class LibraryManager:
@@ -214,12 +217,22 @@ class LibraryManager:
         movie_folder = self.movies_path / f"{title} ({year or 'Unknown'})"
         movie_folder.mkdir(exist_ok=True)
 
-        # Move/copy file to library
+        # Move file to library
         new_file_path = movie_folder / file_path.name
         if file_path != new_file_path and file_path.exists():
-            # In production, you'd move the file
-            # For now, just reference the original
-            new_file_path = file_path
+            import shutil
+            try:
+                # Move the file to the library
+                shutil.move(str(file_path), str(new_file_path))
+                logger.info(f"Moved {file_path.name} to library at {new_file_path}")
+                
+                # Clean up empty parent directory if it exists
+                if file_path.parent.exists() and not any(file_path.parent.iterdir()):
+                    file_path.parent.rmdir()
+            except Exception as e:
+                logger.error(f"Error moving file to library: {e}")
+                # If move fails, reference the original location
+                new_file_path = file_path
 
         movie = Movie(
             id=movie_id,
@@ -475,4 +488,62 @@ class LibraryManager:
         elif "480p" in filename_lower or "sd" in filename_lower:
             return VideoQuality.SD
         return VideoQuality.UNKNOWN
+    
+    async def import_from_download(self, download_path: Path, torrent_name: str) -> Optional[Movie]:
+        """Import a completed download into the library.
+        
+        Args:
+            download_path: Path to the downloaded file/folder
+            torrent_name: Name of the torrent
+            
+        Returns:
+            Movie object if successfully imported, None otherwise
+        """
+        try:
+            # Find the video file
+            if download_path.is_file():
+                video_file = download_path
+            elif download_path.is_dir():
+                video_file = self._find_video_file(download_path)
+                if not video_file:
+                    logger.error(f"No video file found in {download_path}")
+                    return None
+            else:
+                logger.error(f"Download path does not exist: {download_path}")
+                return None
+            
+            # Parse title and year from torrent name
+            # Common patterns: "Movie Title (2024) [720p]", "Movie.Title.2024.720p.BluRay"
+            title = torrent_name
+            year = None
+            
+            # Try to extract year
+            year_match = re.search(r'\((\d{4})\)|\b(\d{4})\b', torrent_name)
+            if year_match:
+                year = int(year_match.group(1) or year_match.group(2))
+                # Remove year and quality tags from title
+                title = re.sub(r'\(\d{4}\)', '', title)
+                title = re.sub(r'\b\d{4}\b', '', title)
+            
+            # Remove quality and release info
+            title = re.sub(r'\[.*?\]', '', title)  # Remove [720p], [YTS.AG], etc.
+            title = re.sub(r'\.(720p|1080p|2160p|BluRay|WEB-DL|HDTV).*', '', title, flags=re.IGNORECASE)
+            title = title.replace('.', ' ').replace('_', ' ')
+            title = re.sub(r'\s+', ' ', title).strip()
+            
+            logger.info(f"Importing movie: '{title}' ({year}) from {video_file.name}")
+            
+            # Add to library
+            movie = await self.add_movie(
+                title=title,
+                file_path=video_file,
+                year=year,
+            )
+            
+            logger.info(f"Successfully imported movie to library: {movie.title}")
+            return movie
+            
+        except Exception as e:
+            logger.error(f"Error importing download to library: {e}", exc_info=True)
+            return None
 
