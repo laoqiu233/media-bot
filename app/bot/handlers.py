@@ -47,6 +47,12 @@ class BotHandlers:
         self.player = mpv_controller
         self.cec = cec_controller
         self.scheduler = series_scheduler
+        
+        # Track last downloads message per chat for live updates
+        self._last_downloads_message: dict = {}  # {chat_id: (message_id, context)}
+        
+        # Start background update task
+        self._update_task = None
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command."""
@@ -56,11 +62,11 @@ class BotHandlers:
             "Available commands:\n"
             "/search <query> - Search for content\n"
             "/library - Browse your media library\n"
-            "/downloads - View download status\n"
+            "/downloads - View & cancel downloads\n"
             "/play - Playback controls\n"
             "/tv_on - Turn TV on\n"
             "/tv_off - Turn TV off\n"
-            "/status - Player status\n"
+            "/status - System status\n"
             "/help - Show this message"
         )
 
@@ -203,30 +209,142 @@ class BotHandlers:
                 await update.message.reply_text("No active downloads.")
                 return
 
-            status_text = "📥 Active Downloads:\n\n"
+            # Send initial message
+            status_text, keyboard = self._format_downloads_message(tasks)
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            message = await update.message.reply_text(status_text, reply_markup=reply_markup)
 
-            for task in tasks:
-                status_text += (
-                    f"📦 {task.torrent_name[:40]}...\n"
-                    f"Status: {task.status}\n"
-                    f"Progress: {task.progress:.1f}%\n"
-                    f"Speed: {task.download_speed / 1024 / 1024:.2f} MB/s\n"
-                    f"Seeders: {task.seeders} | Peers: {task.peers}\n"
-                )
-
-                if task.eta:
-                    minutes = task.eta // 60
-                    status_text += f"ETA: {minutes} min\n"
-
-                status_text += "\n"
-
-            await update.message.reply_text(status_text)
+            # Track this message for updates
+            chat_id = message.chat_id
+            message_id = message.message_id
+            self._last_downloads_message[chat_id] = (message_id, context)
+            
+            # Start update task if not already running
+            if self._update_task is None or self._update_task.done():
+                self._update_task = asyncio.create_task(self._update_downloads_loop())
+            
+            logger.info(f"Tracking downloads message for chat {chat_id}")
 
         except Exception as e:
             logger.error(f"Error getting download status: {e}")
             await update.message.reply_text(
                 "An error occurred while fetching download status."
             )
+
+    def _format_downloads_message(self, tasks):
+        """Format downloads status message and keyboard.
+        
+        Args:
+            tasks: List of download tasks
+            
+        Returns:
+            Tuple of (status_text, keyboard)
+        """
+        status_text = "📥 Active Downloads:\n\n"
+        keyboard = []
+
+        for i, task in enumerate(tasks):
+            # Progress bar
+            progress_bar = self._create_progress_bar(task.progress)
+            
+            status_text += (
+                f"{i+1}. 📦 {task.torrent_name[:35]}...\n"
+                f"   {progress_bar} {task.progress:.1f}%\n"
+                f"   Status: {task.status}\n"
+                f"   Speed: {task.download_speed / 1024 / 1024:.2f} MB/s\n"
+            )
+
+            if task.eta and task.status == "downloading":
+                minutes = task.eta // 60
+                seconds = task.eta % 60
+                status_text += f"   ETA: {minutes}m {seconds}s\n"
+
+            status_text += "\n"
+
+            # Add cancel button for each download
+            button_text = f"❌ Cancel #{i+1}"
+            if task.status == "completed":
+                button_text = f"✅ Completed #{i+1}"
+            
+            keyboard.append([
+                InlineKeyboardButton(
+                    button_text, 
+                    callback_data=f"cancel_dl_{task.id}"
+                )
+            ])
+
+        return status_text, keyboard
+    
+    def _create_progress_bar(self, progress: float, length: int = 10) -> str:
+        """Create a visual progress bar.
+        
+        Args:
+            progress: Progress percentage (0-100)
+            length: Length of the progress bar
+            
+        Returns:
+            Progress bar string
+        """
+        filled = int((progress / 100) * length)
+        empty = length - filled
+        return f"[{'█' * filled}{'░' * empty}]"
+    
+    async def _update_downloads_loop(self):
+        """Background task to update all tracked downloads messages."""
+        logger.info("Started downloads update loop")
+        
+        try:
+            while True:
+                await asyncio.sleep(3)  # Update every 3 seconds
+                
+                if not self._last_downloads_message:
+                    # No messages to update, sleep longer
+                    await asyncio.sleep(5)
+                    continue
+                
+                # Get current download tasks
+                tasks = await self.downloader.get_all_tasks()
+                
+                # Update all tracked messages
+                for chat_id, (message_id, context) in list(self._last_downloads_message.items()):
+                    try:
+                        if not tasks:
+                            # No more downloads
+                            await context.bot.edit_message_text(
+                                chat_id=chat_id,
+                                message_id=message_id,
+                                text="📥 No active downloads.\n\nAll downloads completed or canceled.",
+                            )
+                            # Remove from tracking
+                            del self._last_downloads_message[chat_id]
+                            continue
+                        
+                        # Update message with current status
+                        status_text, keyboard = self._format_downloads_message(tasks)
+                        reply_markup = InlineKeyboardMarkup(keyboard)
+                        
+                        await context.bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=message_id,
+                            text=status_text,
+                            reply_markup=reply_markup,
+                        )
+                    except Exception as e:
+                        # Handle errors (message deleted, not modified, etc.)
+                        if "message is not modified" in str(e).lower():
+                            # No change, continue
+                            pass
+                        elif "message to edit not found" in str(e).lower() or "message can't be edited" in str(e).lower():
+                            # Message was deleted, remove from tracking
+                            logger.info(f"Message {message_id} no longer exists, removing from tracking")
+                            del self._last_downloads_message[chat_id]
+                        else:
+                            logger.debug(f"Could not update message {message_id}: {e}")
+                
+        except asyncio.CancelledError:
+            logger.info("Downloads update loop canceled")
+        except Exception as e:
+            logger.error(f"Error in downloads update loop: {e}", exc_info=True)
 
     async def play_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /play command - show player controls."""
@@ -499,6 +617,51 @@ class BotHandlers:
                     status_text += "⏹ Stopped"
 
                 await query.answer(status_text, show_alert=True)
+
+            # Cancel download
+            elif data.startswith("cancel_dl_"):
+                task_id = data.split("_", 2)[2]
+                
+                # Get task info before canceling
+                task = await self.downloader.get_task_status(task_id)
+                if not task:
+                    await query.answer("Download not found", show_alert=True)
+                    return
+                
+                # Ask for confirmation
+                keyboard = [
+                    [
+                        InlineKeyboardButton("✅ Yes, cancel", callback_data=f"confirm_cancel_{task_id}"),
+                        InlineKeyboardButton("❌ No", callback_data="refresh_downloads"),
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await query.edit_message_text(
+                    f"⚠️ Cancel download?\n\n"
+                    f"📦 {task.torrent_name}\n"
+                    f"Progress: {task.progress:.1f}%\n\n"
+                    f"This will stop the download and remove the torrent.",
+                    reply_markup=reply_markup
+                )
+
+            # Confirm cancel download
+            elif data.startswith("confirm_cancel_"):
+                task_id = data.split("_", 2)[2]
+                
+                success = await self.downloader.remove_download(task_id, delete_files=True)
+                
+                if success:
+                    await query.edit_message_text(
+                        "✅ Download canceled and files removed.\n\n"
+                        "Use /downloads to see remaining downloads."
+                    )
+                    logger.info(f"User canceled download: {task_id}")
+                else:
+                    await query.edit_message_text(
+                        "❌ Failed to cancel download.\n"
+                        "It may have already completed or been removed."
+                    )
 
         except Exception as e:
             logger.error(f"Error handling callback {data}: {e}")
