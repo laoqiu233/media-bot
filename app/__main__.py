@@ -1,7 +1,5 @@
 """Entry point for running app as a module with python -m app."""
 
-from app.main import main
-
 if __name__ == "__main__":
     print("Hello, World!")
 
