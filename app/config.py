@@ -15,6 +15,10 @@ class TelegramConfig(BaseModel):
     """Telegram bot configuration."""
 
     bot_token: str = Field(..., description="Telegram bot API token")
+    authorized_users: list[str] = Field(
+        default_factory=list,
+        description="List of authorized Telegram usernames (without @)",
+    )
 
 
 class MediaLibraryConfig(BaseModel):
@@ -89,6 +93,12 @@ def load_config() -> Config:
             "Please set it in .env file or environment."
         )
 
+    # Load authorized users from comma-separated env var
+    authorized_users_str = os.getenv("AUTHORIZED_USERS", "")
+    authorized_users = [
+        user.strip() for user in authorized_users_str.split(",") if user.strip()
+    ]
+
     media_library_path = os.getenv("MEDIA_LIBRARY_PATH")
     download_path = os.getenv("DOWNLOAD_PATH")
 
@@ -101,7 +111,10 @@ def load_config() -> Config:
     log_level = os.getenv("LOG_LEVEL", "INFO")
 
     config_data = {
-        "telegram": {"bot_token": telegram_token},
+        "telegram": {
+            "bot_token": telegram_token,
+            "authorized_users": authorized_users,
+        },
         "media_library": {},
         "mpv": {"vo": mpv_vo, "ao": mpv_ao},
         "cec": {"enabled": cec_enabled, "device": cec_device},

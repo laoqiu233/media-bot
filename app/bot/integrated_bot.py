@@ -1,11 +1,11 @@
-"""Integrated bot with all system components."""
+"""Integrated bot with screen-based UI system."""
 
 import asyncio
 import logging
 import os
 from pathlib import Path
 
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram.ext import Application, MessageHandler, CallbackQueryHandler, filters
 
 from app.config import load_config
 from app.library.manager import LibraryManager
@@ -14,7 +14,19 @@ from app.torrent.downloader import get_downloader
 from app.player.mpv_controller import player
 from app.tv.hdmi_cec import get_cec_controller
 from app.scheduler.series_scheduler import get_scheduler
+
+# Import screen system
+from app.bot.screen_manager import ScreenManager
+from app.bot.auth import init_auth
 from app.bot.handlers import BotHandlers
+
+# Import screens
+from app.bot.screens.main_menu import MainMenuScreen
+from app.bot.screens.search import SearchScreen
+from app.bot.screens.library import LibraryScreen
+from app.bot.screens.downloads import DownloadsScreen
+from app.bot.screens.player import PlayerScreen
+from app.bot.screens.tv import TVScreen
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +42,16 @@ async def initialize_components():
     # Load configuration
     config = load_config()
 
+    # Initialize authorization
+    auth_manager = None
+    if config.telegram.authorized_users:
+        auth_manager = init_auth(config.telegram.authorized_users)
+        logger.info(
+            f"Authorization enabled for {len(config.telegram.authorized_users)} users"
+        )
+    else:
+        logger.warning("No authorized users configured - bot is open to everyone!")
+
     # Initialize library manager
     library_manager = LibraryManager(config.media_library.library_path)
     movies_count, series_count = await library_manager.scan_library()
@@ -38,7 +60,7 @@ async def initialize_components():
     # Initialize torrent system
     torrent_searcher = TorrentSearcher()
     torrent_downloader = get_downloader(config.media_library.download_path)
-    
+
     # Set up callback to import completed downloads to library
     async def on_download_complete(task_id: str, download_info: dict):
         """Import completed download to library."""
@@ -46,12 +68,11 @@ async def initialize_components():
         download_path = torrent_downloader.get_download_path(task_id)
         if download_path and download_path.exists():
             await library_manager.import_from_download(
-                download_path=download_path,
-                torrent_name=download_info['name']
+                download_path=download_path, torrent_name=download_info["name"]
             )
         else:
             logger.warning(f"Download path not found for task {task_id}")
-    
+
     torrent_downloader.set_completion_callback(on_download_complete)
     torrent_downloader.start_monitoring()
     logger.info("Torrent system initialized")
@@ -82,21 +103,54 @@ async def initialize_components():
     await series_scheduler.load_progress()
     logger.info("Series scheduler initialized")
 
+    # Initialize screen manager
+    screen_manager = ScreenManager()
+
+    # Create and register screens
+    main_menu = MainMenuScreen(screen_manager)
+    search_screen = SearchScreen(screen_manager, torrent_searcher, torrent_downloader)
+    library_screen = LibraryScreen(screen_manager, library_manager, mpv_controller)
+    downloads_screen = DownloadsScreen(screen_manager, torrent_downloader)
+    player_screen = PlayerScreen(screen_manager, mpv_controller)
+    tv_screen = TVScreen(screen_manager, cec_controller)
+
+    screen_manager.register_screen(main_menu)
+    screen_manager.register_screen(search_screen)
+    screen_manager.register_screen(library_screen)
+    screen_manager.register_screen(downloads_screen)
+    screen_manager.register_screen(player_screen)
+    screen_manager.register_screen(tv_screen)
+
+    # Store component references in screen manager for status screen
+    class ComponentHolder:
+        """Simple holder for system components."""
+        def __init__(self):
+            self.player = mpv_controller
+            self.cec = cec_controller
+            self.downloader = torrent_downloader
+            self.library = library_manager
+
+    screen_manager.handlers = ComponentHolder()
+
+    logger.info("Screen system initialized")
+
     # Create bot handlers
     bot_handlers = BotHandlers(
-        library_manager=library_manager,
-        torrent_searcher=torrent_searcher,
-        torrent_downloader=torrent_downloader,
-        mpv_controller=mpv_controller,
-        cec_controller=cec_controller,
-        series_scheduler=series_scheduler,
+        screen_manager=screen_manager,
+        auth_manager=auth_manager,
     )
 
-    return config, bot_handlers, torrent_downloader, mpv_controller, series_scheduler
+    return (
+        config,
+        bot_handlers,
+        torrent_downloader,
+        mpv_controller,
+        series_scheduler,
+    )
 
 
 def run_integrated_bot():
-    """Run the integrated bot with all components."""
+    """Run the integrated bot with screen-based UI."""
     # Setup logging
     logging.basicConfig(
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -107,42 +161,41 @@ def run_integrated_bot():
         """Main async function."""
         # Initialize cleanup variables
         downloader = None
-        player = None
+        player_controller = None
         scheduler = None
-        
+
         try:
             # Initialize components
-            config, handlers, downloader, player, scheduler = (
+            config, handlers, downloader, player_controller, scheduler = (
                 await initialize_components()
             )
 
             # Create Telegram application
             application = Application.builder().token(config.telegram.bot_token).build()
 
-            # Register command handlers
-            application.add_handler(CommandHandler("start", handlers.start_command))
-            application.add_handler(CommandHandler("help", handlers.help_command))
-            application.add_handler(CommandHandler("search", handlers.search_command))
-            application.add_handler(CommandHandler("library", handlers.library_command))
+            # Register handlers
+            # Handle all text messages (creates/shows active screen)
             application.add_handler(
-                CommandHandler("downloads", handlers.downloads_command)
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    handlers.handle_text_message
+                )
             )
-            application.add_handler(CommandHandler("play", handlers.play_command))
-            application.add_handler(CommandHandler("tv_on", handlers.tv_on_command))
-            application.add_handler(CommandHandler("tv_off", handlers.tv_off_command))
-            application.add_handler(CommandHandler("status", handlers.status_command))
 
-            # Register callback query handler
-            application.add_handler(CallbackQueryHandler(handlers.handle_callback))
+            # Handle all callback queries (button clicks)
+            application.add_handler(
+                CallbackQueryHandler(handlers.handle_callback)
+            )
 
             logger.info("🚀 Media Bot is starting...")
+            logger.info("📱 Screen-based UI enabled")
             logger.info("Press Ctrl+C to stop")
 
             # Initialize and start the bot
             await application.initialize()
             await application.start()
             await application.updater.start_polling()
-            
+
             # Keep the bot running
             try:
                 # Wait indefinitely until interrupted
@@ -163,12 +216,11 @@ def run_integrated_bot():
             if downloader:
                 downloader.stop_monitoring()
                 downloader.shutdown()
-            if player:
-                player.shutdown()
+            if player_controller:
+                player_controller.shutdown()
             if scheduler:
                 await scheduler.save_progress()
             logger.info("Shutdown complete")
 
     # Run the async main function
     asyncio.run(main())
-
