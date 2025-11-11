@@ -289,7 +289,7 @@ async def ensure_telegram_token() -> None:
 
     async def on_token_saved(token: str, wifi_ssid: str, wifi_password: str):
         # Persist to .env at project root
-        env_path = project / ".env"
+        env_path = _project_root() / ".env"
         if env_path.exists():
             content = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
         else:
@@ -350,7 +350,7 @@ async def ensure_telegram_token() -> None:
                 capture_output=True,
                 text=True,
             )
-            if result.returncode != 0:
+            if result.returncode != 0:  
                 print(f"[init] nmcli hotspot error: {result.stderr.strip()}")
             else:
                 print(f"[init] nmcli hotspot started: {result.stdout.strip()}")
