@@ -16,7 +16,8 @@ dependencies = [
     "lxml>=5.0.0",
     "libtorrent>=2.0.0",
     "python-dotenv>=1.0.0",
-    "aiofiles>=23.0.0"
+    "aiofiles>=23.0.0",
+    "qrcode[pil]>=7.4"
 ]
 
 [tool.poetry]
