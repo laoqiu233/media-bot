@@ -2,6 +2,7 @@
 
 import logging
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from telegram import CallbackQuery, InlineKeyboardMarkup, Update
@@ -32,8 +33,19 @@ class Navigation:
         self.kwargs = kwargs
 
 
+@dataclass
+class RenderOptions:
+    """Options for controlling how a screen should be rendered."""
+
+    photo_url: str | None = None
+    """Optional photo URL to display with the message."""
+
+    force_new_message: bool = False
+    """If True, forces sending a new message instead of editing the current one."""
+
+
 ScreenHandlerResult = Navigation | None
-ScreenRenderResult = tuple[str, InlineKeyboardMarkup]
+ScreenRenderResult = tuple[str, InlineKeyboardMarkup, RenderOptions]
 
 
 class Screen(ABC):

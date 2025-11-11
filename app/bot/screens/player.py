@@ -18,6 +18,7 @@ from app.bot.callback_data import (
 from app.bot.screens.base import (
     Context,
     Navigation,
+    RenderOptions,
     Screen,
     ScreenHandlerResult,
     ScreenRenderResult,
@@ -117,13 +118,13 @@ class PlayerScreen(Screen):
                     [InlineKeyboardButton("« Back to Menu", callback_data=PLAYER_BACK)],
                 ]
 
-            return (text, InlineKeyboardMarkup(keyboard))
+            return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
         except Exception as e:
             logger.error(f"Error rendering player: {e}")
             text = "🎮 *Player Controls*\n\nError loading player status."
             keyboard = [[InlineKeyboardButton("« Back to Menu", callback_data=PLAYER_BACK)]]
-            return (text, InlineKeyboardMarkup(keyboard))
+            return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
     def _create_progress_bar(self, progress: float, length: int = 15) -> str:
         """Create a visual progress bar.

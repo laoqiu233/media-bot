@@ -36,6 +36,8 @@ class Session:
         # Cache last rendered content to avoid unnecessary updates
         self.last_rendered_text: str | None = None
         self.last_rendered_keyboard = None
+        self.last_poster_url: str | None = None
+        self.is_photo_message = False
 
         # Lock to prevent concurrent render operations
         self._render_lock = asyncio.Lock()
@@ -44,37 +46,101 @@ class Session:
 
     async def render_screen(self, force: bool = False) -> None:
         async with self._render_lock:
-            (render_result_text, render_result_keyboard) = await self.screen.render(self.context)
+            (render_result_text, render_result_keyboard, render_options) = await self.screen.render(
+                self.context
+            )
 
-            # Skip update if content hasn't changed (unless forced)
+            # Get rendering options from screen
+            photo_url = render_options.photo_url
+            force_new_message = render_options.force_new_message
+            has_photo = photo_url is not None
+
+            # Determine if we need to send a new message
+            needs_new_message = (
+                force_new_message
+                or (
+                    self.message_id is not None
+                    and (
+                        (has_photo != self.is_photo_message)
+                        or (has_photo and photo_url != self.last_poster_url)
+                    )
+                )
+            )
+
+            # Skip update if content hasn't changed (unless forced or needs new message)
             if (
                 not force
+                and not needs_new_message
                 and self.message_id is not None
                 and render_result_text == self.last_rendered_text
                 and render_result_keyboard == self.last_rendered_keyboard
             ):
                 return
 
+            # Delete old message if we need to send a new one
+            if needs_new_message and self.message_id is not None:
+                try:
+                    await self.bot.delete_message(self.chat_id, self.message_id)
+                except Exception as e:
+                    logger.debug(f"Could not delete old message: {e}")
+                self.message_id = None
+
             if self.message_id is None:
-                message = await self.bot.send_message(
-                    self.chat_id,
-                    render_result_text,
-                    reply_markup=render_result_keyboard,
-                    parse_mode="Markdown",
-                )
+                # Send new message
+                if has_photo and photo_url:
+                    try:
+                        message = await self.bot.send_photo(
+                            self.chat_id,
+                            photo=photo_url,
+                            caption=render_result_text,
+                            reply_markup=render_result_keyboard,
+                            parse_mode="Markdown",
+                        )
+                        self.is_photo_message = True
+                    except Exception as e:
+                        logger.warning(f"Failed to send photo, falling back to text: {e}")
+                        message = await self.bot.send_message(
+                            self.chat_id,
+                            render_result_text,
+                            reply_markup=render_result_keyboard,
+                            parse_mode="Markdown",
+                        )
+                        self.is_photo_message = False
+                else:
+                    message = await self.bot.send_message(
+                        self.chat_id,
+                        render_result_text,
+                        reply_markup=render_result_keyboard,
+                        parse_mode="Markdown",
+                    )
+                    self.is_photo_message = False
                 self.message_id = message.message_id
             else:
-                await self.bot.edit_message_text(
-                    text=render_result_text,
-                    chat_id=self.chat_id,
-                    message_id=self.message_id,
-                    reply_markup=render_result_keyboard,
-                    parse_mode="Markdown",
-                )
+                # Edit existing message
+                try:
+                    if self.is_photo_message:
+                        await self.bot.edit_message_caption(
+                            chat_id=self.chat_id,
+                            message_id=self.message_id,
+                            caption=render_result_text,
+                            reply_markup=render_result_keyboard,
+                            parse_mode="Markdown",
+                        )
+                    else:
+                        await self.bot.edit_message_text(
+                            text=render_result_text,
+                            chat_id=self.chat_id,
+                            message_id=self.message_id,
+                            reply_markup=render_result_keyboard,
+                            parse_mode="Markdown",
+                        )
+                except Exception as e:
+                    logger.debug(f"Could not edit message: {e}")
 
             # Cache the rendered content
             self.last_rendered_text = render_result_text
             self.last_rendered_keyboard = render_result_keyboard
+            self.last_poster_url = photo_url
 
     async def handle_result(self, result: ScreenHandlerResult) -> None:
         if isinstance(result, Navigation):

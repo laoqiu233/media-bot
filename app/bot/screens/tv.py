@@ -16,6 +16,7 @@ from app.bot.callback_data import (
 from app.bot.screens.base import (
     Context,
     Navigation,
+    RenderOptions,
     Screen,
     ScreenHandlerResult,
     ScreenRenderResult,
@@ -97,13 +98,13 @@ class TVScreen(Screen):
                     ],
                 ]
 
-            return (text, InlineKeyboardMarkup(keyboard))
+            return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
         except Exception as e:
             logger.error(f"Error rendering TV screen: {e}")
             text = "📺 *TV Control*\n\nError loading CEC status."
             keyboard = [[InlineKeyboardButton("« Back to Menu", callback_data=TV_BACK)]]
-            return (text, InlineKeyboardMarkup(keyboard))
+            return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
     async def handle_callback(
         self,

@@ -15,6 +15,7 @@ from app.bot.callback_data import (
 from app.bot.screens.base import (
     Context,
     Navigation,
+    RenderOptions,
     Screen,
     ScreenHandlerResult,
     ScreenRenderResult,
@@ -47,7 +48,7 @@ class MainMenuScreen(Screen):
             ],
         ]
 
-        return (text, InlineKeyboardMarkup(keyboard))
+        return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
     async def handle_callback(
         self,

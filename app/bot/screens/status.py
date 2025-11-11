@@ -9,6 +9,7 @@ from app.bot.callback_data import STATUS_BACK
 from app.bot.screens.base import (
     Context,
     Navigation,
+    RenderOptions,
     Screen,
     ScreenHandlerResult,
     ScreenRenderResult,
@@ -68,7 +69,7 @@ class StatusScreen(Screen):
                 [InlineKeyboardButton("⬅️ Back", callback_data=STATUS_BACK)],
             ]
 
-            return (status_text, InlineKeyboardMarkup(keyboard))
+            return status_text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
         except Exception as e:
             logger.error(f"Error getting system status: {e}")
@@ -76,7 +77,7 @@ class StatusScreen(Screen):
             keyboard = [
                 [InlineKeyboardButton("⬅️ Back", callback_data=STATUS_BACK)],
             ]
-            return (error_text, InlineKeyboardMarkup(keyboard))
+            return error_text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
     async def handle_callback(
         self,
