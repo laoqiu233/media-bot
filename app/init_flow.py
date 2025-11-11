@@ -214,6 +214,8 @@ async def _start_web_server(
     sockets = getattr(site._server, "sockets", None)  # type: ignore[attr-defined]
     actual_port = port
     if sockets:
+        from contextlib import suppress
+
         with suppress(Exception):
             actual_port = sockets[0].getsockname()[1]
     print(f"[http] server listening on {host}:{actual_port}")
