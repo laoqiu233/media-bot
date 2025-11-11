@@ -1,0 +1,576 @@
+# Media Bot - Cursor Rules
+
+## Project Overview
+
+**Type**: Telegram Bot for Raspberry Pi Media Center  
+**Language**: Python 3.11+  
+**Architecture**: Async-first with Screen-Based UI System  
+**Platform**: Raspberry Pi 4 with HDMI-CEC TV Control  
+**Author**: Dmitri Tsiu <laoqiu1015@gmail.com>
+
+---
+
+## Documentation Organization
+
+### Memory Bank Directory
+- **ALL documentation files (*.md) MUST be created in `memory_bank/` directory**
+- **NEVER create markdown files in project root** unless they are:
+  - `README.md` - Project overview and basic usage
+  - `CHANGELOG.md` - Version history (if needed)
+  - `.cursorrules` - This file
+- Implementation summaries, architecture notes, refactoring docs → `memory_bank/`
+- Plan files (*.plan.md) are OK in root temporarily, but summaries go to `memory_bank/`
+
+### Existing Documentation Structure
+```
+memory_bank/
+├── MEMORY_BANK.md                          # Master architecture document
+├── IMDB_INTEGRATION_SUMMARY.md             # IMDb feature documentation
+├── LIBRARY_SCREEN_REFACTOR_SUMMARY.md      # Library refactor details
+├── ON_DEMAND_DETAILS_OPTIMIZATION.md       # Performance optimization notes
+└── RENDER_OPTIONS_REFACTORING.md           # UI refactoring notes
+```
+
+---
+
+## Code Style and Standards
+
+### Python Standards
+- **Python Version**: 3.11+ (use modern type hints)
+- **Line Length**: 100 characters (enforced by Ruff)
+- **Formatter**: Ruff (Black-compatible)
+- **Linter**: Ruff
+- **Type Hints**: Required throughout codebase
+- **Docstrings**: Google style, required for public methods
+- **Import Sorting**: isort style (via Ruff)
+
+### Ruff Configuration
+```python
+line-length = 100
+target-version = "py311"
+select = ["E", "W", "F", "I", "N", "UP", "B", "C4", "SIM"]
+quote-style = "double"
+indent-style = "space"
+```
+
+### Naming Conventions
+- **Files**: `snake_case.py`
+- **Classes**: `PascalCase`
+- **Functions/Methods**: `snake_case()`
+- **Constants**: `UPPER_SNAKE_CASE`
+- **Private members**: `_leading_underscore`
+- **Pydantic models**: `PascalCase` (e.g., `Movie`, `MediaItem`)
+
+---
+
+## Project Architecture
+
+### Screen-Based UI System
+
+**Pattern**: All bot screens extend `Screen` base class from `app/bot/screens/base.py`
+
+**Required Methods**:
+```python
+class MyScreen(Screen):
+    def get_name(self) -> str:
+        """Return unique screen identifier."""
+        return "my_screen"
+    
+    async def render(self, context: Context) -> ScreenRenderResult:
+        """Render screen UI. Returns (text, keyboard, options)."""
+        pass
+    
+    async def handle_callback(self, query: CallbackQuery, context: Context) -> ScreenHandlerResult:
+        """Handle button callbacks. Return Navigation or None."""
+        pass
+    
+    async def handle_message(self, update: Update, context: Context) -> ScreenHandlerResult:
+        """Handle text messages. Return Navigation or None."""
+        pass
+```
+
+**Optional Lifecycle Hooks**:
+- `async def on_enter(self, context: Context, **kwargs)` - Called when entering screen
+- `async def on_exit(self, context: Context)` - Called when leaving screen
+
+**Navigation**:
+```python
+# Navigate to another screen
+return Navigation(next_screen="other_screen", param="value")
+
+# Stay on current screen (will re-render)
+return None
+```
+
+**Render Options**:
+```python
+# Display poster/image with message
+return text, keyboard, RenderOptions(photo_url="https://...")
+
+# Force new message instead of edit
+return text, keyboard, RenderOptions(force_new_message=True)
+```
+
+### Callback Data Constants
+
+**Location**: `app/bot/callback_data.py`
+
+**Naming Pattern**:
+- Format: `{SCREEN}_{ACTION}` (e.g., `LIBRARY_FILTER`, `PLAYER_PAUSE`)
+- Screen prefix identifies which screen handles it
+- Suffix identifies the action
+- Value: `"{screen}:{action}:"` (note trailing colon)
+
+**With Parameters**:
+```python
+# Definition
+LIBRARY_VIEW_MOVIE = "library:view_movie:"  # Followed by movie_id
+
+# Usage in button
+InlineKeyboardButton("View", callback_data=f"{LIBRARY_VIEW_MOVIE}{movie_id}")
+
+# Parsing in handler
+if query.data.startswith(LIBRARY_VIEW_MOVIE):
+    movie_id = query.data[len(LIBRARY_VIEW_MOVIE):]
+```
+
+### Context and State Management
+
+**Per-Screen State**:
+```python
+# Store state
+context.update_context(page=0, filter_query="action", view="list")
+
+# Retrieve state
+page = context.get_context().get("page", 0)
+filter_query = context.get_context().get("filter_query", "")
+
+# Clear state (rarely needed)
+context.clear_context()
+```
+
+**Common State Keys**:
+- `view` - Current view/mode within screen (e.g., "list", "detail", "confirm")
+- `page` - Current pagination page (0-indexed)
+- `selected_{item}_id` - Currently selected item
+- `filter_query` - Active search/filter text
+- `filtering_mode` - Boolean flag for text input mode
+
+### Async Patterns
+
+**All I/O operations MUST be async**:
+```python
+# File operations
+async with aiofiles.open(path, "r") as f:
+    content = await f.read()
+
+# Library operations
+movies = await self.library.get_all_movies()
+movie = await self.library.get_movie(movie_id)
+
+# Player operations
+await self.player.play(file_path)
+await self.player.pause()
+```
+
+**Background Tasks**:
+- Session auto-refresh runs every 0.5 seconds
+- Download monitoring runs every 2 seconds
+- Clean up tasks on shutdown
+
+---
+
+## File Organization
+
+### Directory Structure
+```
+app/
+├── __init__.py
+├── __main__.py              # Entry point
+├── config.py                # Configuration with Pydantic
+├── bot/                     # Telegram bot
+│   ├── integrated_bot.py    # Main orchestrator
+│   ├── handlers.py          # Command handlers
+│   ├── auth.py              # Authorization
+│   ├── callback_data.py     # Callback constants
+│   ├── session_manager.py   # Session management
+│   ├── session.py           # Individual sessions
+│   ├── screen_registry.py   # Screen DI container
+│   └── screens/             # UI screens
+│       ├── base.py          # Base Screen class
+│       ├── main_menu.py
+│       ├── search.py
+│       ├── library.py
+│       ├── downloads.py
+│       ├── player.py
+│       └── ...
+├── library/                 # Media library
+│   ├── manager.py           # Library manager
+│   ├── models.py            # Pydantic models
+│   └── imdb_client.py       # IMDb API client
+├── torrent/                 # Torrent system
+│   ├── searcher.py
+│   └── downloader.py
+├── player/                  # Media player
+│   └── mpv_controller.py
+├── scheduler/               # Series tracking
+│   └── series_scheduler.py
+└── tv/                      # TV control
+    └── hdmi_cec.py
+```
+
+### Screen Files
+- Each screen in its own file: `app/bot/screens/{screen_name}.py`
+- Export screens in `app/bot/screens/__init__.py`
+- Register screens in `app/bot/screen_registry.py`
+
+---
+
+## Pydantic Models
+
+### Location
+- Media models: `app/library/models.py`
+- Config models: `app/config.py`
+
+### Style
+```python
+from pydantic import BaseModel, Field
+
+class Movie(MediaItem):
+    """Movie model with metadata."""
+    
+    id: str = Field(..., description="Unique identifier")
+    title: str = Field(..., description="Movie title")
+    year: int | None = Field(None, description="Release year")
+    genres: list[Genre] = Field(default_factory=list, description="Genres")
+    rating: float | None = Field(None, description="IMDb rating (0-10)")
+    
+    class Config:
+        use_enum_values = True
+```
+
+**Key Conventions**:
+- Use `Field(...)` for required fields
+- Use `Field(None, ...)` for optional fields with descriptions
+- Use `Field(default_factory=list, ...)` for collections
+- Use `|` (union) syntax for Python 3.11+ type hints
+- Include descriptions for all fields
+- Use Enums for fixed value sets
+
+---
+
+## Component Patterns
+
+### Singleton Pattern
+Used for: MPV controller, downloaders, schedulers
+
+```python
+# Global instance
+player = MPVController()
+
+# Usage
+from app.player.mpv_controller import player
+await player.play(file_path)
+```
+
+### Factory Pattern
+Used for: Component initialization
+
+```python
+# In integrated_bot.py
+def get_downloader(path):
+    global _downloader
+    if _downloader is None:
+        _downloader = TorrentDownloader(path)
+    return _downloader
+```
+
+### Dependency Injection
+Used for: Screen dependencies
+
+```python
+# In screen_registry.py
+class ScreenRegistry:
+    def __init__(self, library_manager, player, ...):
+        self.library_screen = LibraryScreen(library_manager, player)
+        self.player_screen = PlayerScreen(player)
+```
+
+---
+
+## Error Handling
+
+### Standard Pattern
+```python
+try:
+    result = await operation()
+    await query.answer("Success!")
+    return result
+except SpecificError as e:
+    logger.error(f"Specific error: {e}")
+    await query.answer("User-friendly error message", show_alert=True)
+    # Graceful fallback
+except Exception as e:
+    logger.error(f"Unexpected error: {e}", exc_info=True)
+    await query.answer("Something went wrong", show_alert=True)
+```
+
+**Key Points**:
+- Always log errors with `logger.error()`
+- Use `exc_info=True` for full stack traces
+- Provide user-friendly error messages to Telegram
+- Implement graceful degradation when possible
+- Never let exceptions crash the bot
+
+---
+
+## Testing Expectations
+
+### Manual Testing Required
+- Test on actual Raspberry Pi hardware
+- Test with real Telegram bot interactions
+- Test HDMI-CEC with actual TV
+- Test MPV playback with various video formats
+
+### Test Coverage Areas
+- Screen navigation flow
+- Callback handling
+- Message handling (filtering/search)
+- Pagination with various item counts
+- Error conditions (missing files, network errors)
+- Edge cases (empty library, no results, etc.)
+
+---
+
+## Git and Version Control
+
+### Commit Messages
+- Format: `{type}: {description}`
+- Types: `feat`, `fix`, `refactor`, `docs`, `chore`, `test`
+- Examples:
+  - `feat: add library filtering functionality`
+  - `fix: handle missing poster gracefully`
+  - `refactor: remove series code from library screen`
+  - `docs: add library refactor summary to memory bank`
+
+### Branch Strategy
+- Main branch: `main` or `master`
+- Feature branches: `feature/{feature-name}`
+- Bug fixes: `fix/{bug-name}`
+- Refactors: `refactor/{component-name}`
+
+---
+
+## Dependencies
+
+### Core Stack
+- **python-telegram-bot** (21.x) - Telegram bot framework
+- **Pydantic** (2.12+) - Data validation and models
+- **aiohttp** (3.9+) - Async HTTP client
+- **python-mpv** (1.0+) - MPV player bindings
+- **libtorrent** (2.0+) - Torrent protocol
+- **aiofiles** (23.0+) - Async file I/O
+
+### Development
+- **ruff** (0.8+) - Linter and formatter
+
+### System Dependencies (Raspberry Pi)
+- `libmpv-dev`, `mpv` - Media player
+- `cec-utils` - HDMI-CEC control
+- `python3.11` - Python interpreter
+
+---
+
+## Performance Considerations
+
+### Raspberry Pi Constraints
+- Limited CPU - avoid CPU-intensive operations in hot paths
+- Limited RAM - use generators and streaming where possible
+- SD card I/O - minimize writes, cache in memory
+
+### Optimization Guidelines
+- Use hardware video decoding (`hwdec="auto"`)
+- Cache library metadata in memory
+- Debounce screen refreshes (0.5s interval)
+- Use async I/O for all operations
+- Limit pagination (8-10 items per page)
+
+---
+
+## Security
+
+### Authorization
+- Username-based via `AUTHORIZED_USERS` environment variable
+- Silent rejection (no response to unauthorized users)
+- All access attempts logged
+
+### Best Practices
+- Never commit `.env` files
+- Never commit bot tokens
+- Log but don't expose sensitive data
+- Validate all user inputs
+- Use Pydantic for input validation
+
+---
+
+## Configuration
+
+### Environment Variables
+Required:
+- `TELEGRAM_BOT_TOKEN` - Bot token from BotFather
+
+Optional (with defaults):
+- `AUTHORIZED_USERS` - Comma-separated usernames
+- `MEDIA_LIBRARY_PATH` - `/home/pi/media_library`
+- `DOWNLOAD_PATH` - `/home/pi/downloads`
+- `MPV_VO` - `gpu`
+- `MPV_AO` - `alsa`
+- `CEC_ENABLED` - `true`
+- `LOG_LEVEL` - `INFO`
+
+### Config Loading
+```python
+from app.config import load_config
+
+config = load_config()  # Loads from environment
+```
+
+---
+
+## Common Patterns
+
+### Paginated Lists
+```python
+page = context.get_context().get("page", 0)
+items_per_page = 8
+
+start_idx = page * items_per_page
+end_idx = start_idx + items_per_page
+page_items = all_items[start_idx:end_idx]
+
+# Navigation buttons
+if page > 0:
+    # Previous button
+if end_idx < len(all_items):
+    # Next button
+```
+
+### Search/Filter Implementation
+```python
+# Trigger filter mode
+if query.data == SCREEN_FILTER:
+    await query.answer("Send your search query", show_alert=True)
+    context.update_context(filtering_mode=True)
+
+# Handle text input
+async def handle_message(self, update: Update, context: Context):
+    if not context.get_context().get("filtering_mode"):
+        return None
+    
+    query = update.message.text.strip()
+    context.update_context(
+        filter_query=query,
+        filtering_mode=False,
+        page=0
+    )
+    
+    # Clean up message
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+```
+
+### Movie Detail View with Poster
+```python
+text = f"🎬 *{movie.title}*\n\n"
+text += f"⭐ {movie.rating:.1f}/10\n"
+text += f"🎭 {', '.join(movie.genres)}\n\n"
+text += f"📖 {movie.description}\n"
+
+# Check for poster
+poster_url = None
+if movie.poster_path and isinstance(movie.poster_path, str):
+    if movie.poster_path.startswith('http'):
+        poster_url = movie.poster_path
+
+return text, keyboard, RenderOptions(photo_url=poster_url)
+```
+
+---
+
+## Development Workflow
+
+### Commands
+```bash
+make run          # Run bot in development
+make lint         # Check code with Ruff
+make lint-fix     # Auto-fix linting issues
+make format       # Format code with Ruff
+make clean        # Clean cache files
+```
+
+### Before Committing
+1. Run `make lint` - ensure no linting errors
+2. Run `make format` - format code
+3. Test manually with bot
+4. Update documentation in `memory_bank/` if needed
+5. Commit with descriptive message
+
+---
+
+## When Creating New Features
+
+### Checklist
+- [ ] Create/update screen in `app/bot/screens/`
+- [ ] Add callback constants to `app/bot/callback_data.py`
+- [ ] Register screen in `screen_registry.py`
+- [ ] Export screen in `screens/__init__.py`
+- [ ] Update models in `models.py` if needed
+- [ ] Add manager methods in `library/manager.py` if needed
+- [ ] Test navigation flow end-to-end
+- [ ] Document in `memory_bank/` directory
+- [ ] Update main `MEMORY_BANK.md` if architecture changed
+
+### Don't Forget
+- Type hints on all functions
+- Docstrings for public methods
+- Error handling with user-friendly messages
+- Logging for debugging
+- Context state management
+- Cleanup (delete user messages, clear state)
+
+---
+
+## Troubleshooting
+
+### Bot Issues
+- Check logs: `sudo journalctl -u media-bot -f`
+- Verify bot token in `.env`
+- Restart session: send `/start` to bot
+- Check authorization: username must be in `AUTHORIZED_USERS`
+
+### Development Issues
+- Linter errors: `make lint-fix`
+- Import errors: ensure `poetry install` completed
+- Type errors: check Python 3.11+ type hints
+- Screen not rendering: check `render()` return type
+
+---
+
+## Summary
+
+**Key Rules to Remember**:
+1. 📝 All documentation → `memory_bank/` directory
+2. 🎨 Use Ruff for linting and formatting (100 char line length)
+3. 🖥️ Extend `Screen` base class for all bot screens
+4. 📱 Use `RenderOptions(photo_url=...)` for images
+5. 🔄 All I/O operations must be async
+6. 🏷️ Callback constants in `callback_data.py` with pattern `SCREEN_ACTION`
+7. 📦 Pydantic models with Field descriptions
+8. ⚡ Optimize for Raspberry Pi (cache, async, pagination)
+9. 🔒 Username-based auth via `AUTHORIZED_USERS`
+10. ✅ Test manually on actual hardware
+
+**When in doubt**: Check `memory_bank/MEMORY_BANK.md` for architecture details.
+

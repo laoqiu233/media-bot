@@ -26,14 +26,15 @@ LIBRARY_BACK = "library:back:"
 LIBRARY_SEARCH = "library:search:"
 LIBRARY_MAIN = "library:main:"
 LIBRARY_MOVIES = "library:movies:"
-LIBRARY_SERIES = "library:series:"
 LIBRARY_MOVIES_PREV = "library:movies_prev:"
 LIBRARY_MOVIES_NEXT = "library:movies_next:"
-LIBRARY_SERIES_PREV = "library:series_prev:"
-LIBRARY_SERIES_NEXT = "library:series_next:"
 LIBRARY_SCAN = "library:scan:"
+LIBRARY_FILTER = "library:filter:"
+LIBRARY_CLEAR_FILTER = "library:clear_filter:"
+LIBRARY_VIEW_MOVIE = "library:view_movie:"  # Followed by movie_id
 LIBRARY_PLAY_MOVIE = "library:play_movie:"  # Followed by movie_id
-LIBRARY_VIEW_SERIES = "library:view_series:"  # Followed by series_id
+LIBRARY_DELETE_MOVIE = "library:delete_movie:"  # Followed by movie_id
+LIBRARY_CONFIRM_DELETE = "library:confirm_delete:"  # Followed by movie_id
 
 # Player screen callbacks
 PLAYER_BACK = "player:back:"
