@@ -130,11 +130,7 @@ async def _start_web_server(host: str, port: int, on_token_saved, ap_ssid: str, 
         peer_ip = request.transport.get_extra_info("peername")[0] if request.transport else None  # type: ignore[index]
         if peer_ip and peer_ip.startswith("10.42."):
             pass  # likely NetworkManager hotspot subnet
-        ssid_value = html.escape(wifi_ssid, quote=True)
-        password_value = html.escape(wifi_password, quote=True)
-        token_value = html.escape(token, quote=True)
-
-        if not token or not wifi_ssid or not wifi_password:
+        if wifi_ssid == '' or wifi_password == '' or token_value == '':
             error_html = "<div class=\"error\">All fields are required.</div>"
             html_content = _render_template(
                 "setup.html",
