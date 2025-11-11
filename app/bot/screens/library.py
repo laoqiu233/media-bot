@@ -21,6 +21,7 @@ from app.bot.callback_data import (
 from app.bot.screens.base import (
     Context,
     Navigation,
+    RenderOptions,
     Screen,
     ScreenHandlerResult,
     ScreenRenderResult,
@@ -91,7 +92,7 @@ class LibraryScreen(Screen):
             keyboard.append([InlineKeyboardButton("🔄 Scan Library", callback_data=LIBRARY_SCAN)])
             keyboard.append([InlineKeyboardButton("« Back to Menu", callback_data=LIBRARY_MAIN)])
 
-        return text, InlineKeyboardMarkup(keyboard)
+        return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
     async def _render_movies(self, context: Context) -> ScreenRenderResult:
         movies = await self.library.get_all_movies()
@@ -133,7 +134,7 @@ class LibraryScreen(Screen):
         # Back button
         keyboard.append([InlineKeyboardButton("« Back to Library", callback_data=LIBRARY_MAIN)])
 
-        return text, InlineKeyboardMarkup(keyboard)
+        return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
     async def _render_series(self, context: Context) -> ScreenRenderResult:
         series_list = await self.library.get_all_series()
@@ -179,7 +180,7 @@ class LibraryScreen(Screen):
         # Back button
         keyboard.append([InlineKeyboardButton("« Back to Library", callback_data=LIBRARY_MAIN)])
 
-        return text, InlineKeyboardMarkup(keyboard)
+        return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
     async def handle_callback(
         self,

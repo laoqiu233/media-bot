@@ -58,3 +58,18 @@ TV_MUTE = "tv:mute:"
 
 # Status screen callbacks
 STATUS_BACK = "status:back:"
+
+# Movie selection screen callbacks
+MOVIE_SELECT = "movie:select:"  # Followed by movie index
+MOVIE_NEXT = "movie:next:"
+MOVIE_PREV = "movie:prev:"
+MOVIE_BACK = "movie:back:"
+
+# Torrent provider selection screen callbacks
+PROVIDER_SELECT = "provider:select:"  # Followed by provider name
+
+# Torrent results screen callbacks
+TORRENT_SELECT = "torrent:select:"  # Followed by result index
+TORRENT_NEXT = "torrent:next:"
+TORRENT_PREV = "torrent:prev:"
+TORRENT_BACK = "torrent:back:"

@@ -10,6 +10,7 @@ from app.bot.handlers import BotHandlers
 from app.bot.screen_registry import ScreenRegistry
 from app.bot.session_manager import SessionManager
 from app.config import load_config
+from app.library.imdb_client import IMDbClient
 from app.library.manager import LibraryManager
 from app.player.mpv_controller import player
 from app.scheduler.series_scheduler import get_scheduler
@@ -43,6 +44,10 @@ async def initialize_components():
     library_manager = LibraryManager(config.media_library.library_path)
     movies_count, series_count = await library_manager.scan_library()
     logger.info(f"Library scanned: {movies_count} movies, {series_count} series")
+
+    # Initialize IMDb client
+    imdb_client = IMDbClient()
+    logger.info("IMDb client initialized")
 
     # Initialize torrent system
     torrent_searcher = TorrentSearcher()
@@ -91,7 +96,12 @@ async def initialize_components():
     logger.info("Series scheduler initialized")
 
     screen_registry = ScreenRegistry(
-        library_manager, mpv_controller, cec_controller, torrent_searcher, torrent_downloader
+        library_manager,
+        mpv_controller,
+        cec_controller,
+        torrent_searcher,
+        torrent_downloader,
+        imdb_client,
     )
 
     logger.info("Screen system initialized")

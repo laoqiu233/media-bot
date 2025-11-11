@@ -14,6 +14,7 @@ from app.bot.callback_data import (
 from app.bot.screens.base import (
     Context,
     Navigation,
+    RenderOptions,
     Screen,
     ScreenHandlerResult,
     ScreenRenderResult,
@@ -55,7 +56,7 @@ class DownloadsScreen(Screen):
                     [InlineKeyboardButton("🔍 Search Content", callback_data=DOWNLOADS_SEARCH)],
                     [InlineKeyboardButton("« Back to Menu", callback_data=DOWNLOADS_BACK)],
                 ]
-                return text, InlineKeyboardMarkup(keyboard)
+                return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
             # Build downloads status text
             text = "📥 *Active Downloads*\n\n"
@@ -77,17 +78,36 @@ class DownloadsScreen(Screen):
                 text += f"{i}. {status_emoji} *{task.torrent_name[:35]}*\n"
                 text += f"   {progress_bar} {task.progress:.1f}%\n"
 
+                # Show size info
+                if task.total_bytes > 0:
+                    downloaded_gb = task.downloaded_bytes / 1024 / 1024 / 1024
+                    total_gb = task.total_bytes / 1024 / 1024 / 1024
+                    text += f"   📦 {downloaded_gb:.2f} / {total_gb:.2f} GB\n"
+
                 if task.status == "downloading":
+                    # Download speed and ETA
                     speed_mb = task.download_speed / 1024 / 1024
-                    text += f"   Speed: {speed_mb:.2f} MB/s"
+                    text += f"   ⬇️ {speed_mb:.2f} MB/s"
 
                     if task.eta:
                         minutes = task.eta // 60
                         seconds = task.eta % 60
                         text += f" • ETA: {minutes}m {seconds}s"
                     text += "\n"
+
+                    # Upload speed
+                    upload_mb = task.upload_speed / 1024 / 1024
+                    text += f"   ⬆️ {upload_mb:.2f} MB/s\n"
+
+                    # Seeders and peers
+                    text += f"   🌱 {task.seeders} seeders • 👥 {task.peers} peers\n"
+
                 elif task.status == "completed":
                     text += "   Status: Completed ✅\n"
+                    # Show upload speed even when completed (seeding)
+                    upload_mb = task.upload_speed / 1024 / 1024
+                    if upload_mb > 0:
+                        text += f"   ⬆️ {upload_mb:.2f} MB/s (seeding)\n"
                 else:
                     text += f"   Status: {task.status}\n"
 
@@ -119,13 +139,13 @@ class DownloadsScreen(Screen):
             # Bottom buttons
             keyboard.append([InlineKeyboardButton("« Back to Menu", callback_data=DOWNLOADS_BACK)])
 
-            return text, InlineKeyboardMarkup(keyboard)
+            return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
         except Exception as e:
             logger.error(f"Error rendering downloads: {e}")
             text = "📥 *Downloads*\n\nError loading downloads."
             keyboard = [[InlineKeyboardButton("« Back to Menu", callback_data=DOWNLOADS_BACK)]]
-            return text, InlineKeyboardMarkup(keyboard)
+            return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
     def _create_progress_bar(self, progress: float, length: int = 10) -> str:
         """Create a visual progress bar.
