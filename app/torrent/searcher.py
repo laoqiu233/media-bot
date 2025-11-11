@@ -170,7 +170,7 @@ class TorrentSearcher:
                         title=result.title,
                         magnet_link=None,
                         torrent_file_link=result.download_url,
-                        size=str(result.size),
+                        size=f"{result.size} {result.unit}",
                         seeders=result.seedmed,
                         leechers=result.leechmed,
                         upload_date=result.added,
