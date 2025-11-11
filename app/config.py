@@ -11,8 +11,8 @@ load_dotenv()
 
 class TrackerConfig(BaseModel):
     proxy: str | None = None
-    username: str = ''
-    password: str = ''
+    username: str | None = None
+    password: str | None = None
 
 class TelegramConfig(BaseModel):
     """Telegram bot configuration."""
