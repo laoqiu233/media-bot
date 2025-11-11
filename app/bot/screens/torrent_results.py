@@ -221,7 +221,7 @@ class TorrentResultsScreen(Screen):
 
                 # Add download with metadata
                 await self.downloader.add_download(
-                    result.magnet_link, result.title, metadata=metadata
+                    result.magnet_link, result.torrent_file_link, result.title, metadata=metadata
                 )
 
                 # Navigate to downloads screen
