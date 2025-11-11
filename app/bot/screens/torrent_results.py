@@ -46,7 +46,7 @@ class TorrentResultsScreen(Screen):
         logger.info(f"Searching torrents for: {search_query} (provider: {provider})")
 
         try:
-            results = await self.searcher.search(search_query, limit=20)
+            results = await self.searcher.search(provider, search_query, limit=20)
             context.update_context(
                 movie=movie,
                 provider=provider,
@@ -109,7 +109,7 @@ class TorrentResultsScreen(Screen):
 
         # Show results with details in text
         for i, result in enumerate(page_results):
-            text += f"{i + 1}. *{result.title[:50]}{'...' if len(result.title) > 50 else ''}*\n"
+            text += f"{i + 1}. *{result.title}*\n"
             text += f"   📁 {result.quality} • {result.size} • 🌱 {result.seeders} seeders\n\n"
 
         keyboard = []
@@ -147,7 +147,8 @@ class TorrentResultsScreen(Screen):
     ) -> ScreenHandlerResult:
         """Handle callback queries."""
         if query.data == TORRENT_BACK:
-            return Navigation(next_screen="torrent_providers")
+            movie: IMDbMovie = context.get_context().get("movie")
+            return Navigation(next_screen="torrent_providers", movie=movie)
 
         elif query.data == TORRENT_PREV:
             page = context.get_context().get("page", 0)

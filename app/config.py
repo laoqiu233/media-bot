@@ -9,6 +9,10 @@ from pydantic import BaseModel, Field
 # Load environment variables
 load_dotenv()
 
+class TrackerConfig(BaseModel):
+    proxy: str | None = None
+    username: str = ''
+    password: str = ''
 
 class TelegramConfig(BaseModel):
     """Telegram bot configuration."""
@@ -76,6 +80,7 @@ class LoggingConfig(BaseModel):
 class Config(BaseModel):
     """Main application configuration."""
 
+    tracker: TrackerConfig
     telegram: TelegramConfig
     media_library: MediaLibraryConfig = Field(default_factory=MediaLibraryConfig)
     mpv: MPVConfig = Field(default_factory=MPVConfig)
@@ -107,7 +112,15 @@ def load_config() -> Config:
 
     log_level = os.getenv("LOG_LEVEL", "INFO")
 
+    tracker_proxy = os.getenv("TRACKER_PROXY")
+    tracker_username = os.getenv("TRACKER_USERNAME")
+    tracker_password = os.getenv("TRACKER_PASSWORD")
     config_data = {
+        "tracker": {
+            "proxy": tracker_proxy,
+            "username": tracker_username,
+            "password": tracker_password
+        },
         "telegram": {
             "bot_token": telegram_token,
             "authorized_users": authorized_users,
@@ -123,7 +136,8 @@ def load_config() -> Config:
     if download_path:
         config_data["media_library"]["download_path"] = Path(download_path)
 
-    return Config(**config_data)
+    config = Config(**config_data)
+    return config
 
 
 # Global config instance (to be initialized in main)

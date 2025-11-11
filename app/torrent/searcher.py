@@ -8,7 +8,9 @@ from urllib.parse import quote
 import aiohttp
 from bs4 import BeautifulSoup
 
+from app.config import Config
 from app.library.models import TorrentSearchResult, VideoQuality
+from py_rutracker import AsyncRuTrackerClient
 
 logger = logging.getLogger(__name__)
 
@@ -16,14 +18,15 @@ logger = logging.getLogger(__name__)
 class TorrentSearcher:
     """Search for torrents from various public sources."""
 
-    def __init__(self):
+    def __init__(self, config: Config):
         """Initialize torrent searcher."""
+        self.config = config
         self.timeout = aiohttp.ClientTimeout(total=30)
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
 
-    async def search(self, query: str, limit: int = 20) -> list[TorrentSearchResult]:
+    async def search(self, provider: str, query: str, limit: int = 20) -> list[TorrentSearchResult]:
         """Search for torrents across multiple sources.
 
         Args:
@@ -36,9 +39,11 @@ class TorrentSearcher:
         logger.info(f"Searching torrents for: {query}")
 
         # Search multiple sources in parallel
-        tasks = [
-            self._search_yts(query, limit),
-        ]
+        tasks = []
+        if provider == 'yts':
+            tasks.append(self._search_yts(query, limit))
+        elif provider == 'rutracker':
+            tasks.append(self._search_tracker(query, limit))
 
         results = []
         try:
@@ -117,6 +122,7 @@ class TorrentSearcher:
 
                             result = TorrentSearchResult(
                                 title=title,
+                                torrent_file_link=None,
                                 magnet_link=magnet,
                                 size=size,
                                 seeders=seeds,
@@ -152,6 +158,30 @@ class TorrentSearcher:
             "480p": VideoQuality.SD,
         }
         return quality_map.get(yts_quality, VideoQuality.UNKNOWN)
+
+    async def _search_tracker(self, query: str, limit: int) -> list[TorrentSearchResult]:
+        results = []
+        try:
+            async with AsyncRuTrackerClient(self.config.tracker.username, self.config.tracker.password, self.config.tracker.proxy) as client:
+                raw_results = await client.search_all_pages(query)
+                
+                for result in raw_results:
+                    results.append(TorrentSearchResult(
+                        title=result.title,
+                        magnet_link=None,
+                        torrent_file_link=result.download_url,
+                        size=str(result.size),
+                        seeders=result.seedmed,
+                        leechers=result.leechmed,
+                        upload_date=result.added,
+                        source='RuTracker',
+                        quality=self._detect_quality(result.title),
+                    ))
+                    
+        except Exception as e:
+            logger.error(f"Error searching RuTracker: {e}")
+        logger.info(f"Found {len(results)} results from RuTracker")
+        return results
 
     async def _search_piratebay(self, query: str, limit: int) -> list[TorrentSearchResult]:
         """Search The Pirate Bay (using proxy/mirror).
@@ -301,6 +331,3 @@ class TorrentSearcher:
         except Exception:
             return None
 
-
-# Global searcher instance
-searcher = TorrentSearcher()

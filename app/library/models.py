@@ -113,7 +113,8 @@ class TorrentSearchResult(BaseModel):
     """Torrent search result model."""
 
     title: str = Field(..., description="Torrent title")
-    magnet_link: str = Field(..., description="Magnet link")
+    magnet_link: str | None = Field(..., description="Magnet link")
+    torrent_file_link: str | None = Field(..., description="Torrent file link")
     size: str = Field(..., description="File size (human readable)")
     size_bytes: int | None = Field(None, description="File size in bytes")
     seeders: int = Field(default=0, description="Number of seeders")

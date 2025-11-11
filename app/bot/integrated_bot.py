@@ -50,8 +50,8 @@ async def initialize_components():
     logger.info("IMDb client initialized")
 
     # Initialize torrent system
-    torrent_searcher = TorrentSearcher()
-    torrent_downloader = get_downloader(config.media_library.download_path)
+    torrent_searcher = TorrentSearcher(config)
+    torrent_downloader = get_downloader(config)
 
     # Set up callback to import completed downloads to library
     async def on_download_complete(task_id: str, download_info: dict):
