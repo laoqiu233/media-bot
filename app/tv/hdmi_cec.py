@@ -108,7 +108,7 @@ class CECController:
             True if successful
         """
         logger.info("Turning TV on via CEC")
-        success, output = await self._send_cec_command("on 0")
+        success, output = await self._send_cec_command("pow 0")
         return success
 
     async def tv_off(self) -> bool:
