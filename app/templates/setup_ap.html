@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Media Bot — Connect to AP</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 2rem; }
+      .card { max-width: 520px; margin: 0 auto; border: 1px solid #ddd; border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 10px rgba(0,0,0,0.06); }
+      h1 { font-size: 1.4rem; margin: 0 0 1rem; }
+      label { display:block; font-weight:600; margin: 0.5rem 0; }
+      .hint { color: #666; font-size: 0.9rem; margin-top: 0.5rem; }
+      .foot { color: #888; font-size: 0.85rem; margin-top: 1rem; }
+      code { background:#f6f8fa; padding:2px 6px; border-radius:6px; }
+      button { margin-top: 1rem; padding: 0.6rem 1rem; font-size: 1rem; background: #0d6efd; color: #fff; border: none; border-radius: 8px; cursor: pointer; }
+      button:hover { background: #0b5ed7; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Connect to the device Wi‑Fi</h1>
+      <p>Join the Wi‑Fi network shown on screen or below, then click Continue.</p>
+      <p><b>SSID:</b> <code>{{AP_SSID}}</code><br><b>Password:</b> <code>{{AP_PASS}}</code></p>
+      <div class="hint">If you already connected to the device Wi‑Fi, just press Continue.</div>
+      <form method="POST" action="/ap-continue">
+        <button type="submit">Continue</button>
+      </form>
+      <div class="foot">You will be redirected to enter your home Wi‑Fi credentials and bot token.</div>
+    </div>
+  </body>
+</html>
+
+

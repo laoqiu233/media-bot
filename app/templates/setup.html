@@ -21,12 +21,16 @@
     <div class="card">
       <h1>Media Bot — Initial Setup</h1>
       <form method="POST" action="/submit">
+        <label for="wifi_ssid">Wi‑Fi SSID</label>
+        <input id="wifi_ssid" name="wifi_ssid" type="text" placeholder="YourHomeWiFi" required>
+        <label for="wifi_password">Wi‑Fi Password</label>
+        <input id="wifi_password" name="wifi_password" type="text" placeholder="••••••••" required>
         <label for="token">Telegram Bot Token</label>
         <input id="token" name="token" type="text" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" required>
         <div class="hint">Get one from <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">BotFather</a>.</div>
-        <button type="submit">Save token</button>
+        <button type="submit">Save and connect</button>
       </form>
-      <div class="foot">This will write <code>TELEGRAM_BOT_TOKEN</code> to your project .env</div>
+      <div class="foot">This saves <code>WIFI_SSID</code>, <code>WIFI_PASSWORD</code> and <code>TELEGRAM_BOT_TOKEN</code> to your project .env</div>
     </div>
   </body>
 </html>
