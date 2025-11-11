@@ -45,7 +45,7 @@ async def initialize_components():
     logger.info(f"Library scanned: {movies_count} movies, {series_count} series")
 
     # Initialize torrent system
-    torrent_searcher = TorrentSearcher()
+    torrent_searcher = TorrentSearcher(config)
     torrent_downloader = get_downloader(config.media_library.download_path)
 
     # Set up callback to import completed downloads to library

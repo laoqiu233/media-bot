@@ -17,7 +17,8 @@ dependencies = [
     "libtorrent>=2.0.0",
     "python-dotenv>=1.0.0",
     "aiofiles>=23.0.0",
-    "qrcode[pil]>=7.4"
+    "qrcode[pil]>=7.4",
+    "py-rutracker-client (>=0.1.0,<0.2.0)"
 ]
 
 [tool.poetry]
