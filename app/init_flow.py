@@ -68,7 +68,7 @@ def _detect_wifi_interface() -> str | None:
     # Prefer nmcli when available
     try:
         proc = subprocess.run(
-            ["nmcli", "-t", "-f", "DEVICE,TYPE", "dev", "status"],
+            ["sudo", "nmcli", "-t", "-f", "DEVICE,TYPE", "dev", "status"],
             check=False,
             capture_output=True,
             text=True,
@@ -677,7 +677,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
         connect_result = await loop.run_in_executor(
             None,
             lambda: subprocess.run(
-                ["nmcli", "dev", "wifi", "connect", wifi_ssid, "password", wifi_password, "ifname", wifi_iface],
+                ["sudo", "nmcli", "dev", "wifi", "connect", wifi_ssid, "password", wifi_password, "ifname", wifi_iface],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -689,11 +689,11 @@ async def ensure_telegram_token(force: bool = False) -> None:
             error = connect_result.stderr.strip() or "Failed to connect to the provided Wi‑Fi network."
             print(f"[init] Wi‑Fi connect failed: {error}")
             # Make sure hotspot stays active so the user can retry
-            print("Reconnecting after wrong creds\n", "nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password)
+            print("Reconnecting after wrong creds\n", "sudo", "nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password)
             await loop.run_in_executor(
                 None,
                 lambda: subprocess.run(
-                    ["nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password],
+                    ["sudo", "nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password],
                     check=False,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
@@ -735,20 +735,20 @@ async def ensure_telegram_token(force: bool = False) -> None:
         print(f"[init] Starting hotspot SSID={current_ap_ssid}")
         try:
             subprocess.run(
-                ["nmcli", "radio", "wifi", "on"],
+                ["sudo", "nmcli", "radio", "wifi", "on"],
                 check=False,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
             subprocess.run(
-                ["nmcli", "dev", "set", wifi_iface, "managed", "yes"],
+                ["sudo", "nmcli", "dev", "set", wifi_iface, "managed", "yes"],
                 check=False,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            print("Hosting hotspot\n", "nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password)
+            print("Hosting hotspot\n", "sudo", "nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password)
             result = subprocess.run(
-                ["nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password],
+                ["sudo", "nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -762,7 +762,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
                 print(f"[init] nmcli hotspot started: {result.stdout.strip()}")
                 con_name = None
                 con_list = subprocess.run(
-                    ["nmcli", "-t", "-f", "NAME,DEVICE,TYPE", "con", "show", "--active"],
+                    ["sudo", "nmcli", "-t", "-f", "NAME,DEVICE,TYPE", "con", "show", "--active"],
                     check=False,
                     capture_output=True,
                     text=True,
@@ -782,27 +782,27 @@ async def ensure_telegram_token(force: bool = False) -> None:
                 # Apply sharing and static addressing; ignore errors if fields unsupported
                 # Use common NetworkManager shared subnet 10.42.0.0/24 with gateway .1
                 for args in [
-                    ["nmcli", "con", "modify", con_name, "ipv4.method", "shared"],
-                    ["nmcli", "con", "modify", con_name, "ipv4.addresses", "10.42.0.1/24"],
-                    ["nmcli", "con", "modify", con_name, "ipv4.gateway", "10.42.0.1"],
-                    ["nmcli", "con", "modify", con_name, "ipv4.never-default", "yes"],
-                    ["nmcli", "con", "modify", con_name, "ipv6.method", "ignore"],
+                    ["sudo", "nmcli", "con", "modify", con_name, "ipv4.method", "shared"],
+                    ["sudo", "nmcli", "con", "modify", con_name, "ipv4.addresses", "10.42.0.1/24"],
+                    ["sudo", "nmcli", "con", "modify", con_name, "ipv4.gateway", "10.42.0.1"],
+                    ["sudo", "nmcli", "con", "modify", con_name, "ipv4.never-default", "yes"],
+                    ["sudo", "nmcli", "con", "modify", con_name, "ipv6.method", "ignore"],
                     # Force 2.4GHz band and stable channel; some clients can't use 5GHz APs
-                    ["nmcli", "con", "modify", con_name, "802-11-wireless.band", "bg"],
-                    ["nmcli", "con", "modify", con_name, "802-11-wireless.channel", "6"],
+                    ["sudo", "nmcli", "con", "modify", con_name, "802-11-wireless.band", "bg"],
+                    ["sudo", "nmcli", "con", "modify", con_name, "802-11-wireless.channel", "6"],
                     # Ensure AP mode and SSID are correct
-                    ["nmcli", "con", "modify", con_name, "802-11-wireless.mode", "ap"],
-                    ["nmcli", "con", "modify", con_name, "802-11-wireless.ssid", current_ap_ssid],
+                    ["sudo", "nmcli", "con", "modify", con_name, "802-11-wireless.mode", "ap"],
+                    ["sudo", "nmcli", "con", "modify", con_name, "802-11-wireless.ssid", current_ap_ssid],
                     # Improve compatibility: WPA2-PSK (RSN) with CCMP only
-                    ["nmcli", "con", "modify", con_name, "wifi-sec.key-mgmt", "wpa-psk"],
-                    ["nmcli", "con", "modify", con_name, "wifi-sec.proto", "rsn"],
-                    ["nmcli", "con", "modify", con_name, "wifi-sec.group", "ccmp"],
-                    ["nmcli", "con", "modify", con_name, "wifi-sec.pairwise", "ccmp"],
-                    ["nmcli", "con", "modify", con_name, "wifi-sec.psk", current_ap_password],
+                    ["sudo", "nmcli", "con", "modify", con_name, "wifi-sec.key-mgmt", "wpa-psk"],
+                    ["sudo", "nmcli", "con", "modify", con_name, "wifi-sec.proto", "rsn"],
+                    ["sudo", "nmcli", "con", "modify", con_name, "wifi-sec.group", "ccmp"],
+                    ["sudo", "nmcli", "con", "modify", con_name, "wifi-sec.pairwise", "ccmp"],
+                    ["sudo", "nmcli", "con", "modify", con_name, "wifi-sec.psk", current_ap_password],
                     # Disable MAC randomization to avoid reconnect loops on some devices
-                    ["nmcli", "con", "modify", con_name, "wifi.mac-address-randomization", "0"],
+                    ["sudo", "nmcli", "con", "modify", con_name, "wifi.mac-address-randomization", "0"],
                     [
-                        "nmcli",
+                        "sudo", "nmcli",
                         "con",
                         "modify",
                         con_name,
@@ -810,7 +810,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
                         "preserve",
                     ],
                     # Reduce powersave issues
-                    ["nmcli", "con", "modify", con_name, "802-11-wireless.powersave", "2"],
+                    ["sudo", "nmcli", "con", "modify", con_name, "802-11-wireless.powersave", "2"],
                 ]:
                     r = subprocess.run(args, check=False, capture_output=True, text=True)
                     if r.returncode != 0:
@@ -819,10 +819,10 @@ async def ensure_telegram_token(force: bool = False) -> None:
                         )
                 # Reload the connection to apply changes
                 r1 = subprocess.run(
-                    ["nmcli", "con", "down", con_name], check=False, capture_output=True, text=True
+                    ["sudo", "nmcli", "con", "down", con_name], check=False, capture_output=True, text=True
                 )
                 r2 = subprocess.run(
-                    ["nmcli", "con", "up", con_name], check=False, capture_output=True, text=True
+                    ["sudo", "nmcli", "con", "up", con_name], check=False, capture_output=True, text=True
                 )
                 if r1.returncode != 0:
                     print(f"[init] nmcli down warn: {r1.stderr.strip()}")
