@@ -50,6 +50,7 @@ class TorrentProvidersScreen(Screen):
         # Define available providers
         providers = [
             {"name": "YTS", "emoji": "🎥", "description": "High quality movies"},
+            {"name": "RuTracker", "emoji": "🏴‍☠️", "description": "You know what this is"},
         ]
 
         keyboard = []

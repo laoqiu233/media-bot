@@ -26,7 +26,7 @@ class TorrentSearcher:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
 
-    async def search(self, query: str, limit: int = 20) -> list[TorrentSearchResult]:
+    async def search(self, provider: str, query: str, limit: int = 20) -> list[TorrentSearchResult]:
         """Search for torrents across multiple sources.
 
         Args:
@@ -39,9 +39,11 @@ class TorrentSearcher:
         logger.info(f"Searching torrents for: {query}")
 
         # Search multiple sources in parallel
-        tasks = [
-            self._search_yts(query, limit),
-        ]
+        tasks = []
+        if provider == 'yts':
+            tasks.append(self._search_yts(query, limit))
+        elif provider == 'rutracker':
+            tasks.append(self._search_tracker(query, limit))
 
         results = []
         try:
@@ -120,6 +122,7 @@ class TorrentSearcher:
 
                             result = TorrentSearchResult(
                                 title=title,
+                                torrent_file_link=None,
                                 magnet_link=magnet,
                                 size=size,
                                 seeders=seeds,
