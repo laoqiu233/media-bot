@@ -5,12 +5,14 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
+from py_rutracker import AsyncRuTrackerClient
 
 try:
     import libtorrent as lt
 except ImportError:
     lt = None
 
+from app.config import Config
 from app.library.models import DownloadTask
 
 logger = logging.getLogger(__name__)
@@ -19,7 +21,7 @@ logger = logging.getLogger(__name__)
 class TorrentDownloader:
     """Manages torrent downloads using libtorrent."""
 
-    def __init__(self, download_path: Path):
+    def __init__(self, config: Config, download_path: Path):
         """Initialize torrent downloader.
 
         Args:
@@ -30,8 +32,10 @@ class TorrentDownloader:
                 "libtorrent is not installed. Please install it: pip install libtorrent"
             )
 
+        self.config = config
         self.download_path = download_path
         self.download_path.mkdir(parents=True, exist_ok=True)
+        download_path.joinpath('torrents').mkdir(exist_ok=True)
 
         # Initialize libtorrent session with settings
         try:
@@ -82,7 +86,7 @@ class TorrentDownloader:
             self._monitor_task.cancel()
             logger.info("Download monitoring stopped")
 
-    async def add_download(self, magnet_link: str, name: str) -> str:
+    async def add_download(self, magnet_link: str | None, torrent_file_link: str | None, name: str) -> str:
         """Add a new torrent download.
 
         Args:
@@ -95,20 +99,39 @@ class TorrentDownloader:
         task_id = str(uuid4())
 
         try:
-            # Parse magnet link
-            params = lt.parse_magnet_uri(magnet_link)
+            handle = None
+            if magnet_link is not None:
+                # Parse magnet link
+                params = lt.parse_magnet_uri(magnet_link)
 
-            # Add torrent to session
-            params.save_path = str(self.download_path)
+                # Add torrent to session
+                params.save_path = str(self.download_path)
 
-            # Add the torrent
-            handle = self.session.add_torrent(params)
+                # Add the torrent
+                handle = self.session.add_torrent(params)
+            else:
+                try:
+                    file_name = f"{torrent_file_link[-7:]}.torrent"
+                    file_path = self.download_path.joinpath('torrents', file_name)
+                    async with AsyncRuTrackerClient(self.config.tracker.username, self.config.tracker.password, self.config.tracker.proxy) as client:
+                        bytes = await client.download(torrent_file_link)
+                        with open(file_path, mode='wb') as file:
+                            file.write(bytes)
+                    params = {
+                        'save_path': str(self.download_path),
+                        'ti': lt.torrent_info(str(file_path))
+                    }
+                    handle = self.session.add_torrent(params)
+                except Exception as e:
+                    logger.error(f"Error downloading from torrent file link: {e}")
+                    raise
+                        
 
             # Store download info
             self.downloads[task_id] = {
                 "handle": handle,
                 "name": name,
-                "magnet_link": magnet_link,
+                "magnet_link": magnet_link if magnet_link is not None else torrent_file_link,
                 "created_at": datetime.now(),
             }
 
@@ -370,7 +393,7 @@ class TorrentDownloader:
 downloader: TorrentDownloader | None = None
 
 
-def get_downloader(download_path: Path) -> TorrentDownloader:
+def get_downloader(config: Config) -> TorrentDownloader:
     """Get or create the global downloader instance.
 
     Args:
@@ -381,5 +404,5 @@ def get_downloader(download_path: Path) -> TorrentDownloader:
     """
     global downloader
     if downloader is None:
-        downloader = TorrentDownloader(download_path)
+        downloader = TorrentDownloader(config, config.media_library.download_path)
     return downloader

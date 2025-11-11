@@ -40,7 +40,7 @@ class TorrentSearcher:
 
         # Search multiple sources in parallel
         tasks = [
-            self._search_tracker(query, limit),
+            self._search_yts(query, limit),
         ]
 
         results = []
@@ -165,13 +165,14 @@ class TorrentSearcher:
                 for result in raw_results:
                     results.append(TorrentSearchResult(
                         title=result.title,
-                        magnet_link=result.download_url,
+                        magnet_link=None,
+                        torrent_file_link=result.download_url,
                         size=str(result.size),
                         seeders=result.seedmed,
                         leechers=result.leechmed,
                         upload_date=result.added,
                         source='RuTracker',
-                        quality=VideoQuality.UNKNOWN
+                        quality=self._detect_quality(result.title),
                     ))
                     
         except Exception as e:

@@ -178,7 +178,7 @@ class SearchScreen(Screen):
                 await query.answer(f"Starting download: {result.title[:30]}...", show_alert=False)
 
                 # Add download
-                await self.downloader.add_download(result.magnet_link, result.title)
+                await self.downloader.add_download(result.magnet_link, result.torrent_file_link, result.title)
 
                 # Navigate to downloads screen
                 return Navigation(next_screen="downloads")
