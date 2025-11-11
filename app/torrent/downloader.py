@@ -144,11 +144,7 @@ class TorrentDownloader:
             self._monitor_task.cancel()
             logger.info("Download monitoring stopped")
 
-<<<<<<< HEAD
-    async def add_download(self, magnet_link: str | None, torrent_file_link: str | None, name: str) -> str:
-=======
-    async def add_download(self, magnet_link: str, name: str, metadata: dict | None = None) -> str:
->>>>>>> 6bd26d8 (fix library downloads)
+    async def add_download(self, magnet_link: str | None, torrent_file_link: str | None, name: str, metadata: dict | None = None) -> str:
         """Add a new torrent download.
 
         Args:
@@ -189,26 +185,15 @@ class TorrentDownloader:
                     logger.error(f"Error downloading from torrent file link: {e}")
                     raise
                         
-
-<<<<<<< HEAD
-            # Store download info
-            self.downloads[task_id] = {
-                "handle": handle,
-                "name": name,
-                "magnet_link": magnet_link if magnet_link is not None else torrent_file_link,
-                "created_at": datetime.now(),
-            }
-=======
             # Store download state
             self.downloads[task_id] = DownloadState(
                 task_id=task_id,
                 handle=handle,
                 name=name,
-                magnet_link=magnet_link,
+                magnet_link=magnet_link if magnet_link is not None else torrent_file_link,
                 created_at=datetime.now(),
                 metadata=metadata,
             )
->>>>>>> 6bd26d8 (fix library downloads)
 
             logger.info(f"Added torrent download: {name} (ID: {task_id})")
 
