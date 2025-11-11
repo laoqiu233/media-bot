@@ -480,6 +480,58 @@ class LibraryManager:
             return VideoQuality.SD
         return VideoQuality.UNKNOWN
 
+    async def delete_movie(self, movie_id: str) -> bool:
+        """Delete a movie from the library.
+
+        Args:
+            movie_id: Movie ID
+
+        Returns:
+            True if successfully deleted, False otherwise
+        """
+        try:
+            movie = await self.get_movie(movie_id)
+            if not movie:
+                logger.warning(f"Movie not found: {movie_id}")
+                return False
+
+            # Delete the movie file
+            if movie.file_path:
+                file_path = Path(movie.file_path) if isinstance(movie.file_path, str) else movie.file_path
+                if file_path.exists():
+                    file_path.unlink()
+                    logger.info(f"Deleted movie file: {file_path}")
+
+                # Delete metadata file
+                movie_folder = file_path.parent
+                metadata_file = movie_folder / "metadata.json"
+                if metadata_file.exists():
+                    metadata_file.unlink()
+                    logger.info(f"Deleted metadata file: {metadata_file}")
+
+                # Delete poster if exists
+                if movie.poster_path:
+                    poster_path = Path(movie.poster_path) if isinstance(movie.poster_path, str) else movie.poster_path
+                    if poster_path.exists():
+                        poster_path.unlink()
+                        logger.info(f"Deleted poster: {poster_path}")
+
+                # Delete the movie folder if empty
+                if movie_folder.exists() and not any(movie_folder.iterdir()):
+                    movie_folder.rmdir()
+                    logger.info(f"Deleted empty folder: {movie_folder}")
+
+            # Remove from cache
+            if movie_id in self._movies_cache:
+                del self._movies_cache[movie_id]
+
+            logger.info(f"Successfully deleted movie: {movie.title}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error deleting movie: {e}", exc_info=True)
+            return False
+
     async def import_from_download(self, download_path: Path, torrent_name: str) -> Movie | None:
         """Import a completed download into the library.
 

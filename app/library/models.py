@@ -169,3 +169,78 @@ class UserWatchProgress(BaseModel):
         if self.duration == 0:
             return 0.0
         return (self.position / self.duration) * 100
+
+
+# IMDb API models - field names match API response structure (mixedCase intentional)
+# ruff: noqa: N815
+
+
+class IMDbImage(BaseModel):
+    """IMDb image model."""
+
+    url: str | None = Field(None, description="Image URL")
+    width: int | None = Field(None, description="Image width")
+    height: int | None = Field(None, description="Image height")
+
+
+class IMDbName(BaseModel):
+    """IMDb name model (actor, director, etc.)."""
+
+    id: str = Field(..., description="IMDb name ID")
+    displayName: str = Field(..., description="Person's display name")
+
+    @property
+    def name(self) -> str:
+        """Get name (alias for displayName)."""
+        return self.displayName
+
+
+class IMDbRating(BaseModel):
+    """IMDb rating model."""
+
+    aggregateRating: float | None = Field(None, description="Average rating (0-10)")
+    voteCount: int | None = Field(None, description="Number of votes")
+
+
+class IMDbMovie(BaseModel):
+    """IMDb movie/title model."""
+
+    id: str = Field(..., description="IMDb title ID (e.g., tt1234567)")
+    type: str | None = Field(None, description="Title type (MOVIE, TV_SERIES, etc.)")
+    primaryTitle: str = Field(..., description="Primary title")
+    originalTitle: str | None = Field(None, description="Original title")
+    startYear: int | None = Field(None, description="Release/start year")
+    endYear: int | None = Field(None, description="End year (for series)")
+    primaryImage: IMDbImage | None = Field(None, description="Primary poster image")
+    rating: IMDbRating | None = Field(None, description="Rating information")
+    plot: str | None = Field(None, description="Plot summary")
+    directors: list[IMDbName] = Field(default_factory=list, description="List of directors")
+    writers: list[IMDbName] = Field(default_factory=list, description="List of writers")
+    stars: list[IMDbName] = Field(default_factory=list, description="List of stars")
+    genres: list[str] = Field(default_factory=list, description="List of genres")
+    runtimeSeconds: int | None = Field(None, description="Runtime in seconds")
+
+    @property
+    def poster_url(self) -> str | None:
+        """Get poster URL."""
+        return self.primaryImage.url if self.primaryImage else None
+
+    @property
+    def director_names(self) -> list[str]:
+        """Get list of director names."""
+        return [d.name for d in self.directors]
+
+    @property
+    def rating_value(self) -> float | None:
+        """Get rating value."""
+        return self.rating.aggregateRating if self.rating else None
+
+    @property
+    def vote_count(self) -> int | None:
+        """Get vote count."""
+        return self.rating.voteCount if self.rating else None
+
+    class Config:
+        """Pydantic config."""
+
+        populate_by_name = True

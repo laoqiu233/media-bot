@@ -15,12 +15,13 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
+import re
+import html as html_lib
 
 from aiohttp import web
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
 import logging
-
 
 def _project_root() -> Path:
     # app/ -> project root
@@ -96,6 +97,9 @@ async def _start_web_server(host: str, port: int, on_token_saved, ap_ssid: str, 
     Returns:
         (runner, actual_port)
     """
+    # Shared state for connection status
+    connection_status = {"status": "idle", "message": "", "error": None}
+    
     # Very lightweight request logging
     @web.middleware
     async def log_requests(request, handler):
@@ -106,37 +110,78 @@ async def _start_web_server(host: str, port: int, on_token_saved, ap_ssid: str, 
         return resp
 
     async def handle_index(_request: web.Request) -> web.Response:
-        # Stage 1: AP connect page
-        html_path = _templates_dir() / "setup_ap.html"
-        html = html_path.read_text(encoding="utf-8")
-        html = html.replace("{{AP_SSID}}", ap_ssid).replace("{{AP_PASS}}", ap_password)
+        html = _render_template("setup_ap.html", AP_SSID=ap_ssid, AP_PASS=ap_password)
         return web.Response(text=html, content_type="text/html")
 
     async def handle_ap_continue(_request: web.Request) -> web.Response:
-        # Stage 2: Wi‑Fi + token form
-        html_path = _templates_dir() / "setup.html"
-        html = html_path.read_text(encoding="utf-8")
+        html = _render_template(
+            "setup.html",
+            ERROR_BOX="",
+            WIFI_SSID="",
+            WIFI_PASSWORD="",
+            TOKEN="",
+        )
         return web.Response(text=html, content_type="text/html")
+
+    async def handle_status(_request: web.Request) -> web.Response:
+        """Return current connection status as JSON."""
+        import json
+        return web.Response(
+            text=json.dumps(connection_status),
+            content_type="application/json"
+        )
 
     async def handle_submit(request: web.Request) -> web.Response:
         data = await request.post()
-        token = (data.get("token") or "").strip()
-        wifi_ssid = (data.get("wifi_ssid") or "").strip()
-        wifi_password = (data.get("wifi_password") or "").strip()
+        token = (data.get("token") or "")
+        wifi_ssid = (data.get("wifi_ssid") or "")
+        wifi_password = (data.get("wifi_password") or "")
         # Optional: only accept submissions from clients on AP subnet (best-effort)
         peer_ip = request.transport.get_extra_info("peername")[0] if request.transport else None  # type: ignore[index]
         if peer_ip and peer_ip.startswith("10.42."):
             pass  # likely NetworkManager hotspot subnet
-        if not token or not wifi_ssid or not wifi_password:
-            return web.Response(text="Wi‑Fi SSID, password and token are required", status=400)
-        await on_token_saved(token, wifi_ssid, wifi_password)
-        return web.Response(
-            text="Token saved. You can close this page. The app will continue.",
-            content_type="text/plain",
-        )
+        if wifi_ssid == '' or wifi_password == '' or token == '':
+            error_html = "<div class=\"error\">All fields are required.</div>"
+            html_content = _render_template(
+                "setup.html",
+                ERROR_BOX=error_html,
+                WIFI_SSID=wifi_ssid,
+                WIFI_PASSWORD=wifi_password,
+                TOKEN=token,
+            )
+            return web.Response(text=html_content, content_type="text/html", status=400)
+        
+        # Reset status and start connection in background
+        connection_status["status"] = "connecting"
+        connection_status["message"] = "Saving credentials..."
+        connection_status["error"] = None
+        
+        # Return status polling page immediately
+        html = _render_template("setup_status.html")
+        
+        # Start connection process in background
+        async def connect_background():
+            try:
+                connection_status["message"] = "Connecting to Wi‑Fi network..."
+                success, error_msg = await on_token_saved(token, wifi_ssid, wifi_password)
+                if success:
+                    connection_status["status"] = "success"
+                    connection_status["message"] = "Successfully connected!"
+                else:
+                    connection_status["status"] = "error"
+                    connection_status["error"] = error_msg or "Could not connect to the Wi‑Fi network."
+            except Exception as e:
+                connection_status["status"] = "error"
+                connection_status["error"] = str(e)
+        
+        # Schedule background task
+        asyncio.create_task(connect_background())
+        
+        return web.Response(text=html, content_type="text/html", status=200)
 
     app = web.Application(middlewares=[log_requests])
     app.router.add_get("/", handle_index)
+    app.router.add_get("/status", handle_status)
     app.router.add_post("/ap-continue", handle_ap_continue)
     app.router.add_post("/submit", handle_submit)
 
@@ -161,87 +206,149 @@ def _generate_qr_png(content: str, out_path: Path) -> None:
     img = qrcode.make(content)
     img.save(out_path)
 
-def _generate_url_qr_with_caption(setup_url: str, out_path: Path, note: str | None = None) -> None:
-    """Generate a single QR for the setup URL with a short caption."""
-    qr_img = qrcode.make(setup_url).convert("RGB")
-    qr_size = 420
-    qr_img = qr_img.resize((qr_size, qr_size))
-    padding = 24
-    title_height = 60
-    text_height = 60
-    canvas_h = padding * 3 + title_height + qr_size + (text_height if note else 0)
-    canvas_w = padding * 2 + qr_size
-    img = Image.new("RGB", (canvas_w, canvas_h), color=(18, 18, 18))
-    draw = ImageDraw.Draw(img)
-    try:
-        font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", 26)
-        font_text = ImageFont.truetype("DejaVuSans.ttf", 18)
-    except Exception:
-        font_title = ImageFont.load_default()
-        font_text = ImageFont.load_default()
-    draw.text((padding, padding), "Media Bot Setup", fill=(230, 230, 230), font=font_title)
-    img.paste(qr_img, (padding, padding + title_height))
-    if note:
-        draw.text(
-            (padding, padding * 2 + title_height + qr_size),
-            note,
-            fill=(220, 220, 220),
-            font=font_text,
-        )
-    img.save(out_path)
+def _render_template(template_name: str, **replacements: str) -> str:
+    html = (_templates_dir() / template_name).read_text(encoding="utf-8")
+    for key, value in replacements.items():
+        html = html.replace(f"{{{{{key}}}}}", value)
+    # Strip any unreplaced placeholders like {{SOME_TOKEN}}
+    return re.sub(r"\{\{[A-Z0-9_]+\}\}", "", html)
 
 def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_path: Path) -> None:
     """Create a composite image with two QRs: Wi‑Fi join and setup URL, plus brief text."""
-    url_qr = qrcode.make(setup_url).convert("RGB")
-    wifi_qr = qrcode.make(_wifi_qr_payload(ap_ssid, ap_password)).convert("RGB")
-    qr_size = 360
-    url_qr = url_qr.resize((qr_size, qr_size))
-    wifi_qr = wifi_qr.resize((qr_size, qr_size))
-    padding = 24
-    title_height = 60
-    text_height = 80
-    width = padding * 3 + qr_size * 2
-    height = padding * 3 + title_height + qr_size + text_height
-    img = Image.new("RGB", (width, height), color=(18, 18, 18))
+    # Use higher quality QR codes
+    qr_factory = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=2,
+    )
+    
+    # Generate WiFi QR
+    qr_factory.add_data(_wifi_qr_payload(ap_ssid, ap_password))
+    qr_factory.make(fit=True)
+    wifi_qr = qr_factory.make_image(fill_color=(34, 211, 238), back_color=(15, 23, 42)).convert("RGB")
+    
+    # Generate URL QR
+    qr_factory = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=2,
+    )
+    qr_factory.add_data(setup_url)
+    qr_factory.make(fit=True)
+    url_qr = qr_factory.make_image(fill_color=(34, 211, 238), back_color=(15, 23, 42)).convert("RGB")
+    
+    # Responsive sizing - larger for better scanning
+    qr_size = 400
+    url_qr = url_qr.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
+    wifi_qr = wifi_qr.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
+    
+    # Modern styling with better spacing
+    padding = 40
+    title_height = 80
+    subtitle_height = 50
+    text_height = 100
+    qr_spacing = 30
+    
+    # Calculate width - stack vertically on mobile, side-by-side on larger displays
+    # For now, use side-by-side but with better text wrapping
+    width = padding * 3 + qr_size * 2 + qr_spacing
+    height = padding * 2 + title_height + subtitle_height + qr_size + text_height
+    
+    # Create gradient background
+    img = Image.new("RGB", (width, height), color=(15, 23, 42))
     draw = ImageDraw.Draw(img)
+    
+    # Draw subtle gradient effect
+    for y in range(height):
+        ratio = y / height
+        r = int(15 + (30 - 15) * ratio)
+        g = int(23 + (41 - 23) * ratio)
+        b = int(42 + (59 - 42) * ratio)
+        draw.line([(0, y), (width, y)], fill=(r, g, b))
+    
+    # Load fonts with fallback
     try:
-        font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", 26)
-        font_text = ImageFont.truetype("DejaVuSans.ttf", 18)
+        font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", 32)
+        font_subtitle = ImageFont.truetype("DejaVuSans.ttf", 20)
+        font_text = ImageFont.truetype("DejaVuSans.ttf", 16)
     except Exception:
-        font_title = ImageFont.load_default()
-        font_text = ImageFont.load_default()
-    draw.text((padding, padding), "Media Bot Setup", fill=(230, 230, 230), font=font_title)
-    img.paste(wifi_qr, (padding, padding + title_height))
-    img.paste(url_qr, (padding * 2 + qr_size, padding + title_height))
-    wifi_text = f"1) Join AP: {ap_ssid}  Pass: {ap_password}"
-    url_text = f"2) Open setup: {setup_url}"
-    draw.text((padding, padding * 2 + title_height + qr_size), wifi_text, fill=(220, 220, 220), font=font_text)
-    draw.text((padding * 2 + qr_size, padding * 2 + title_height + qr_size), url_text, fill=(220, 220, 220), font=font_text)
-    img.save(out_path)
-
-def _generate_wifi_qr_with_caption(ap_ssid: str, ap_password: str, setup_url: str, out_path: Path) -> None:
-    """Generate a single Wi‑Fi QR (join AP) with caption including the setup URL."""
-    wifi_qr = qrcode.make(_wifi_qr_payload(ap_ssid, ap_password)).convert("RGB")
-    qr_size = 420
-    wifi_qr = wifi_qr.resize((qr_size, qr_size))
-    padding = 24
-    title_height = 60
-    text_height = 80
-    width = padding * 2 + qr_size
-    height = padding * 3 + title_height + qr_size + text_height
-    img = Image.new("RGB", (width, height), color=(18, 18, 18))
-    draw = ImageDraw.Draw(img)
-    try:
-        font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", 26)
-        font_text = ImageFont.truetype("DejaVuSans.ttf", 18)
-    except Exception:
-        font_title = ImageFont.load_default()
-        font_text = ImageFont.load_default()
-    draw.text((padding, padding), "Media Bot Setup", fill=(230, 230, 230), font=font_title)
-    img.paste(wifi_qr, (padding, padding + title_height))
-    caption = f"Join Wi‑Fi: {ap_ssid}  Pass: {ap_password}\nThen open: {setup_url}"
-    draw.text((padding, padding * 2 + title_height + qr_size), caption, fill=(220, 220, 220), font=font_text)
-    img.save(out_path)
+        try:
+            font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 32)
+            font_subtitle = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
+            font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
+        except Exception:
+            font_title = ImageFont.load_default()
+            font_subtitle = ImageFont.load_default()
+            font_text = ImageFont.load_default()
+    
+    # Title with gradient effect
+    title_y = padding
+    draw.text((padding, title_y), "Media Bot Setup", fill=(34, 211, 238), font=font_title)
+    
+    # Subtitle
+    subtitle_y = title_y + title_height - 10
+    draw.text((padding, subtitle_y), "Scan QR codes to configure", fill=(203, 213, 225), font=font_subtitle)
+    
+    # QR codes with labels
+    qr_y = subtitle_y + subtitle_height + 10
+    img.paste(wifi_qr, (padding, qr_y))
+    img.paste(url_qr, (padding * 2 + qr_size + qr_spacing, qr_y))
+    
+    # Text labels below QR codes - wrap long text
+    text_y = qr_y + qr_size + 15
+    
+    # WiFi text - wrap if too long
+    wifi_label = f"1) WiFi: {ap_ssid}"
+    wifi_pass_text = f"Pass: {ap_password}"
+    max_text_width = qr_size - 20
+    
+    # Draw WiFi label
+    draw.text((padding + 10, text_y), wifi_label, fill=(226, 232, 240), font=font_text)
+    
+    # Draw password on next line if needed
+    bbox = draw.textbbox((0, 0), wifi_label, font=font_text)
+    wifi_label_width = bbox[2] - bbox[0]
+    if wifi_label_width < max_text_width:
+        draw.text((padding + 10, text_y + 22), wifi_pass_text, fill=(203, 213, 225), font=font_text)
+    else:
+        # Wrap to next line
+        draw.text((padding + 10, text_y + 22), wifi_pass_text, fill=(203, 213, 225), font=font_text)
+    
+    # URL text - truncate if too long for mobile
+    url_label = f"2) Setup URL"
+    url_display = setup_url
+    if len(url_display) > 35:
+        url_display = url_display[:32] + "..."
+    
+    draw.text((padding * 2 + qr_size + qr_spacing + 10, text_y), url_label, fill=(226, 232, 240), font=font_text)
+    
+    # Wrap URL if needed
+    url_lines = []
+    words = url_display.split()
+    current_line = ""
+    for word in words:
+        test_line = current_line + (" " if current_line else "") + word
+        bbox = draw.textbbox((0, 0), test_line, font=font_text)
+        if bbox[2] - bbox[0] <= max_text_width:
+            current_line = test_line
+        else:
+            if current_line:
+                url_lines.append(current_line)
+            current_line = word
+    if current_line:
+        url_lines.append(current_line)
+    
+    for i, line in enumerate(url_lines[:2]):  # Max 2 lines
+        draw.text(
+            (padding * 2 + qr_size + qr_spacing + 10, text_y + 22 + i * 20),
+            line,
+            fill=(203, 213, 225),
+            font=font_text
+        )
+    
+    img.save(out_path, quality=95, optimize=True)
 
 async def _display_with_mpv(image_path: Path) -> subprocess.Popen:
     """Launch mpv to display the provided image fullscreen in a loop."""
@@ -274,22 +381,48 @@ def _append_or_replace_env_line(lines: list[str], key: str, value: str) -> list[
     return new_lines
 
 
-async def ensure_telegram_token() -> None:
+async def ensure_telegram_token(force: bool = False) -> None:
     """Ensure TELEGRAM_BOT_TOKEN is available; if not, run the QR+form setup flow."""
-    if os.getenv("TELEGRAM_BOT_TOKEN"):
+    if os.getenv("TELEGRAM_BOT_TOKEN") and not force:
         return
+
+    if os.environ.get("MEDIA_BOT_SETUP_ACTIVE") == "1":
+        print("[init] Setup flow already running; ignoring duplicate request.")
+        return
+    os.environ["MEDIA_BOT_SETUP_ACTIVE"] = "1"
 
     host_ip = _detect_local_ip()
     desired_port = 8765
-    # Check whether Wi-Fi and bot token exist
-    have_token = bool(os.getenv("TELEGRAM_BOT_TOKEN"))
 
     mpv_proc: Optional[subprocess.Popen] = None
     mpv_failed = False
+    setup_completed = False
+    current_ap_ssid = os.getenv("SETUP_AP_SSID", "media-bot-setup")
+    current_ap_password = os.getenv("SETUP_AP_PASSWORD", "mediabot1234")
 
-    async def on_token_saved(token: str, wifi_ssid: str, wifi_password: str):
+    async def on_token_saved(token: str, wifi_ssid: str, wifi_password: str) -> tuple[bool, Optional[str]]:
+        nonlocal mpv_proc, setup_completed, current_ap_ssid, current_ap_password
+        wifi_iface = _detect_wifi_interface() or "wlan0"
+        connect_result = subprocess.run(
+            ["nmcli", "dev", "wifi", "connect", wifi_ssid, "password", wifi_password, "ifname", wifi_iface],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if connect_result.returncode != 0:
+            error = connect_result.stderr.strip() or "Failed to connect to the provided Wi-Fi network."
+            print(f"[init] Wi-Fi connect failed: {error}")
+            # Make sure hotspot stays active so the user can retry
+            subprocess.run(
+                ["nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return False, error
+
         # Persist to .env at project root
-        env_path = project / ".env"
+        env_path = _project_root() / ".env"
         if env_path.exists():
             content = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
         else:
@@ -299,38 +432,36 @@ async def ensure_telegram_token() -> None:
         new_lines = _append_or_replace_env_line(new_lines, "WIFI_PASSWORD", wifi_password)
         env_path.write_text("".join(new_lines), encoding="utf-8")
 
-        # Also set for this process so we can proceed immediately
         os.environ["TELEGRAM_BOT_TOKEN"] = token
         os.environ["WIFI_SSID"] = wifi_ssid
         os.environ["WIFI_PASSWORD"] = wifi_password
 
-        # Try to connect to provided Wi‑Fi
-        wifi_iface = _detect_wifi_interface() or "wlan0"
-        try:
-            subprocess.run(
-                ["nmcli", "dev", "wifi", "connect", wifi_ssid, "password", wifi_password, "ifname", wifi_iface],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception:
-            pass
+        setup_completed = True
+        print("[init] Wi-Fi connection established successfully.")
 
-        # Close mpv window if running
         if mpv_proc and mpv_proc.poll() is None:
             try:
                 mpv_proc.terminate()
             except Exception:
                 pass
 
+        # If this was triggered from within a running bot (force=True), signal restart needed
+        if os.environ.get("MEDIA_BOT_RUNNING") == "1":
+            restart_flag = _project_root() / ".setup" / ".restart_needed"
+            restart_flag.parent.mkdir(parents=True, exist_ok=True)
+            restart_flag.write_text("1", encoding="utf-8")
+            print("[init] Bot restart flag set. The bot will restart shortly.")
+
+        return True, None
+
     async def run_flow():
-        nonlocal mpv_proc, mpv_failed
+        nonlocal mpv_proc, mpv_failed, current_ap_ssid, current_ap_password
         # Ensure hotspot is up BEFORE generating QR
-        ap_ssid = os.getenv("SETUP_AP_SSID", "media-bot-setup")
-        ap_password = os.getenv("SETUP_AP_PASSWORD", "mediabot1234")
+        current_ap_ssid = os.getenv("SETUP_AP_SSID", "media-bot-setup")
+        current_ap_password = os.getenv("SETUP_AP_PASSWORD", "mediabot1234")
         wifi_iface = _detect_wifi_interface() or "wlan0"
         print(f"[init] Using Wi‑Fi interface: {wifi_iface}")
-        print(f"[init] Starting hotspot SSID={ap_ssid}")
+        print(f"[init] Starting hotspot SSID={current_ap_ssid}")
         try:
             subprocess.run(
                 ["nmcli", "radio", "wifi", "on"],
@@ -345,12 +476,12 @@ async def ensure_telegram_token() -> None:
                 stderr=subprocess.DEVNULL,
             )
             result = subprocess.run(
-                ["nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", ap_ssid, "password", ap_password],
+                ["nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password],
                 check=False,
                 capture_output=True,
                 text=True,
             )
-            if result.returncode != 0:
+            if result.returncode != 0:  
                 print(f"[init] nmcli hotspot error: {result.stderr.strip()}")
             else:
                 print(f"[init] nmcli hotspot started: {result.stdout.strip()}")
@@ -386,13 +517,13 @@ async def ensure_telegram_token() -> None:
                     ["nmcli", "con", "modify", con_name, "802-11-wireless.channel", "6"],
                     # Ensure AP mode and SSID are correct
                     ["nmcli", "con", "modify", con_name, "802-11-wireless.mode", "ap"],
-                    ["nmcli", "con", "modify", con_name, "802-11-wireless.ssid", ap_ssid],
+                    ["nmcli", "con", "modify", con_name, "802-11-wireless.ssid", current_ap_ssid],
                     # Improve compatibility: WPA2-PSK (RSN) with CCMP only
                     ["nmcli", "con", "modify", con_name, "wifi-sec.key-mgmt", "wpa-psk"],
                     ["nmcli", "con", "modify", con_name, "wifi-sec.proto", "rsn"],
                     ["nmcli", "con", "modify", con_name, "wifi-sec.group", "ccmp"],
                     ["nmcli", "con", "modify", con_name, "wifi-sec.pairwise", "ccmp"],
-                    ["nmcli", "con", "modify", con_name, "wifi-sec.psk", ap_password],
+                    ["nmcli", "con", "modify", con_name, "wifi-sec.psk", current_ap_password],
                     # Disable MAC randomization to avoid reconnect loops on some devices
                     ["nmcli", "con", "modify", con_name, "wifi.mac-address-randomization", "0"],
                     ["nmcli", "con", "modify", con_name, "802-11-wireless.cloned-mac-address", "preserve"],
@@ -430,9 +561,9 @@ async def ensure_telegram_token() -> None:
 
         # Start server; if desired port is busy, fall back to ephemeral port 0
         try:
-            runner, bound_port = await _start_web_server("0.0.0.0", desired_port, on_token_saved, ap_ssid, ap_password)
+            runner, bound_port = await _start_web_server("0.0.0.0", desired_port, on_token_saved, current_ap_ssid, current_ap_password)
         except OSError:
-            runner, bound_port = await _start_web_server("0.0.0.0", 0, on_token_saved, ap_ssid, ap_password)
+            runner, bound_port = await _start_web_server("0.0.0.0", 0, on_token_saved, current_ap_ssid, current_ap_password)
         setup_url = f"http://{ap_ip}:{bound_port}/"
         print(setup_url)
         # Prepare QR image under project data dir
@@ -440,9 +571,9 @@ async def ensure_telegram_token() -> None:
         tmp_dir = project / ".setup"
         tmp_dir.mkdir(parents=True, exist_ok=True)
 
-        # Generate single Wi‑Fi QR with caption (SSID/Pass + URL text)
+        # Generate dual QR (Wi‑Fi join + setup URL)
         qr_png = tmp_dir / "setup_qr.png"
-        _generate_wifi_qr_with_caption(ap_ssid, ap_password, setup_url, qr_png)
+        _generate_composite_qr(setup_url, current_ap_ssid, current_ap_password, qr_png)
         try:
             # Try to show QR with mpv; fallback to printing URL if mpv missing
             try:
@@ -451,12 +582,20 @@ async def ensure_telegram_token() -> None:
                 mpv_failed = True
                 print(f"[init] mpv not found. Open this URL to configure: {setup_url}", file=sys.stderr)
 
-            # Wait until TELEGRAM_BOT_TOKEN appears in env (set by on_token_saved)
-            while not os.getenv("TELEGRAM_BOT_TOKEN"):
+            # Wait until setup completes successfully
+            while not setup_completed:
                 await asyncio.sleep(0.5)
         finally:
             await runner.cleanup()
+            if mpv_proc and mpv_proc.poll() is None:
+                try:
+                    mpv_proc.terminate()
+                except Exception:
+                    pass
 
-    await run_flow()
+    try:
+        await run_flow()
+    finally:
+        os.environ.pop("MEDIA_BOT_SETUP_ACTIVE", None)
 
 

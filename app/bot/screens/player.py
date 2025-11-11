@@ -9,6 +9,7 @@ from app.bot.callback_data import (
     PLAYER_BACK,
     PLAYER_LIBRARY,
     PLAYER_PAUSE,
+    PLAYER_RESUME,
     PLAYER_SEEK,
     PLAYER_STOP,
     PLAYER_VOL_DOWN,
@@ -17,6 +18,7 @@ from app.bot.callback_data import (
 from app.bot.screens.base import (
     Context,
     Navigation,
+    RenderOptions,
     Screen,
     ScreenHandlerResult,
     ScreenRenderResult,
@@ -47,12 +49,17 @@ class PlayerScreen(Screen):
 
             text = "🎮 *Player Controls*\n\n"
 
-            if status["is_playing"]:
+            if status["current_file"]:
                 # Show current playback info
                 filename = (
                     Path(status["current_file"]).name if status.get("current_file") else "Unknown"
                 )
-                text += f"▶️ *Playing:*\n{filename}\n\n"
+                is_paused = status.get("is_paused", False)
+                
+                if is_paused:
+                    text += f"⏸ *Paused:*\n{filename}\n\n"
+                else:
+                    text += f"▶️ *Playing:*\n{filename}\n\n"
 
                 if status.get("position") is not None and status.get("duration") is not None:
                     progress_pct = (
@@ -73,10 +80,16 @@ class PlayerScreen(Screen):
                 volume = status.get("volume", 0)
                 text += f"Volume: {volume}%\n"
 
-                # Playback control buttons
+                # Playback control buttons - show pause or resume based on state
+                pause_resume_button = (
+                    InlineKeyboardButton("▶️ Resume", callback_data=PLAYER_RESUME)
+                    if is_paused
+                    else InlineKeyboardButton("⏸ Pause", callback_data=PLAYER_PAUSE)
+                )
+                
                 keyboard = [
                     [
-                        InlineKeyboardButton("⏸ Pause", callback_data=PLAYER_PAUSE),
+                        pause_resume_button,
                         InlineKeyboardButton("⏹ Stop", callback_data=PLAYER_STOP),
                     ],
                     [
@@ -105,13 +118,13 @@ class PlayerScreen(Screen):
                     [InlineKeyboardButton("« Back to Menu", callback_data=PLAYER_BACK)],
                 ]
 
-            return (text, InlineKeyboardMarkup(keyboard))
+            return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
         except Exception as e:
             logger.error(f"Error rendering player: {e}")
             text = "🎮 *Player Controls*\n\nError loading player status."
             keyboard = [[InlineKeyboardButton("« Back to Menu", callback_data=PLAYER_BACK)]]
-            return (text, InlineKeyboardMarkup(keyboard))
+            return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
     def _create_progress_bar(self, progress: float, length: int = 15) -> str:
         """Create a visual progress bar.
@@ -141,6 +154,10 @@ class PlayerScreen(Screen):
         elif query.data == PLAYER_PAUSE:
             success = await self.player.pause()
             await query.answer("⏸ Paused" if success else "Failed")
+
+        elif query.data == PLAYER_RESUME:
+            success = await self.player.resume()
+            await query.answer("▶️ Resumed" if success else "Failed")
 
         elif query.data == PLAYER_STOP:
             success = await self.player.stop()
