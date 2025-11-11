@@ -7,6 +7,7 @@ MAIN_MENU_DOWNLOADS = "main_menu:downloads:"
 MAIN_MENU_PLAYER = "main_menu:player:"
 MAIN_MENU_TV = "main_menu:tv:"
 MAIN_MENU_STATUS = "main_menu:status:"
+MAIN_MENU_SETUP = "main_menu:setup:"
 
 # Search screen callbacks
 SEARCH_BACK = "search:back:"

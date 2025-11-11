@@ -1,5 +1,6 @@
 """Main menu screen."""
 
+import asyncio
 import logging
 
 from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
@@ -9,6 +10,7 @@ from app.bot.callback_data import (
     MAIN_MENU_LIBRARY,
     MAIN_MENU_PLAYER,
     MAIN_MENU_SEARCH,
+    MAIN_MENU_SETUP,
     MAIN_MENU_STATUS,
     MAIN_MENU_TV,
 )
@@ -20,6 +22,7 @@ from app.bot.screens.base import (
     ScreenHandlerResult,
     ScreenRenderResult,
 )
+from app.init_flow import ensure_telegram_token
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +49,7 @@ class MainMenuScreen(Screen):
                 InlineKeyboardButton("📺 TV Control", callback_data=MAIN_MENU_TV),
                 InlineKeyboardButton("ℹ️ System Status", callback_data=MAIN_MENU_STATUS),
             ],
+            [InlineKeyboardButton("🛠 Wi‑Fi / Token Setup", callback_data=MAIN_MENU_SETUP)],
         ]
 
         return text, InlineKeyboardMarkup(keyboard), RenderOptions()
@@ -72,3 +76,8 @@ class MainMenuScreen(Screen):
 
         elif query.data == MAIN_MENU_STATUS:
             return Navigation(next_screen="status")
+
+        elif query.data == MAIN_MENU_SETUP:
+            await query.answer("Setup wizard reopened. Check the display for new QR codes.")
+            asyncio.create_task(ensure_telegram_token(force=True))
+            return None
