@@ -113,9 +113,88 @@
         border: 1px solid rgba(148, 163, 184, 0.35);
         color: #f8fafc;
       }
+      button:active {
+        transform: translateY(0);
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+      }
+      .status-indicator {
+        display: none;
+        padding: 1rem;
+        border-radius: 12px;
+        margin-bottom: 1rem;
+        text-align: center;
+        font-weight: 500;
+      }
+      .status-indicator.active {
+        display: block;
+      }
+      .status-indicator.connecting {
+        background: rgba(59, 130, 246, 0.12);
+        border: 1px solid rgba(96, 165, 250, 0.35);
+        color: #93c5fd;
+      }
+      .status-indicator.success {
+        background: rgba(34, 197, 94, 0.12);
+        border: 1px solid rgba(74, 222, 128, 0.35);
+        color: #86efac;
+      }
+      .status-indicator.error {
+        background: rgba(239, 68, 68, 0.12);
+        border: 1px solid rgba(248, 113, 113, 0.35);
+        color: #fca5a5;
+      }
+      .spinner {
+        display: inline-block;
+        width: 16px;
+        height: 16px;
+        border: 2px solid rgba(148, 163, 184, 0.3);
+        border-top-color: currentColor;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        vertical-align: middle;
+        margin-right: 8px;
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
       @media (max-width: 520px) {
         .card {
-          padding: 2rem 1.5rem;
+          padding: 1.75rem 1.25rem;
+          width: 95vw;
+        }
+        h1 {
+          font-size: 1.4rem;
+        }
+        .subtitle {
+          font-size: 0.95rem;
+        }
+        input[type="text"],
+        input[type="password"] {
+          padding: 0.95rem 1rem;
+          font-size: 16px; /* Prevents zoom on iOS */
+        }
+        button {
+          padding: 1rem;
+          font-size: 1.1rem;
+          min-height: 48px; /* Better touch target */
+        }
+        .hint {
+          font-size: 0.88rem;
+        }
+        .foot {
+          font-size: 0.85rem;
+        }
+      }
+      @media (max-width: 380px) {
+        .card {
+          padding: 1.5rem 1rem;
+        }
+        h1 {
+          font-size: 1.25rem;
         }
       }
     </style>
@@ -128,7 +207,8 @@
         The device will switch from the setup hotspot to your home Wi‑Fi after a successful connection.
       </p>
       {{ERROR_BOX}}
-      <form method="POST" action="/submit">
+      <div id="status-indicator" class="status-indicator"></div>
+      <form id="setup-form" method="POST" action="/submit">
         <div>
           <label for="wifi_ssid">Home Wi‑Fi Name (SSID)</label>
           <input id="wifi_ssid" name="wifi_ssid" type="text" placeholder="HomeNetwork" value="{{WIFI_SSID}}" required>
@@ -142,7 +222,7 @@
           <input id="token" name="token" type="text" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" value="{{TOKEN}}" required>
           <div class="hint">Tip: send <code>/token</code> to BotFather if you need to regenerate it.</div>
         </div>
-        <button type="submit">Save &amp; Connect</button>
+        <button type="submit" id="submit-btn">Save &amp; Connect</button>
       </form>
       <div class="foot">
         • The Media Bot will reboot its Wi‑Fi connection after you submit.<br>
@@ -150,6 +230,103 @@
         • Credentials are stored securely in your <code>.env</code> file on the device.
       </div>
     </div>
+    <script>
+      (function() {
+        const form = document.getElementById('setup-form');
+        const submitBtn = document.getElementById('submit-btn');
+        const statusIndicator = document.getElementById('status-indicator');
+        let pollInterval = null;
+        
+        function showStatus(message, type) {
+          statusIndicator.textContent = message;
+          statusIndicator.className = 'status-indicator active ' + type;
+        }
+        
+        function hideStatus() {
+          statusIndicator.className = 'status-indicator';
+        }
+        
+        function startPolling() {
+          let pollCount = 0;
+          const maxPolls = 60; // 60 seconds max
+          
+          pollInterval = setInterval(async () => {
+            pollCount++;
+            if (pollCount > maxPolls) {
+              clearInterval(pollInterval);
+              showStatus('Connection timeout. Please check your Wi‑Fi credentials and try again.', 'error');
+              submitBtn.disabled = false;
+              return;
+            }
+            
+            try {
+              const response = await fetch('/status');
+              const data = await response.json();
+              
+              if (data.status === 'success') {
+                clearInterval(pollInterval);
+                showStatus('✅ Connected successfully! Redirecting...', 'success');
+                setTimeout(() => {
+                  window.location.href = '/success';
+                }, 1500);
+              } else if (data.status === 'error') {
+                clearInterval(pollInterval);
+                showStatus('❌ ' + (data.message || 'Connection failed. Please check your credentials.'), 'error');
+                submitBtn.disabled = false;
+              } else if (data.status === 'connecting') {
+                showStatus('<span class="spinner"></span>Connecting to Wi‑Fi network...', 'connecting');
+              }
+            } catch (error) {
+              console.error('Polling error:', error);
+              // Continue polling on network errors
+            }
+          }, 1000);
+        }
+        
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          
+          submitBtn.disabled = true;
+          hideStatus();
+          
+          const formData = new FormData(form);
+          
+          try {
+            const response = await fetch('/submit', {
+              method: 'POST',
+              body: formData
+            });
+            
+            const contentType = response.headers.get('content-type') || '';
+            
+            if (response.ok && contentType.includes('application/json')) {
+              // Success - start polling
+              showStatus('<span class="spinner"></span>Connecting to Wi‑Fi network...', 'connecting');
+              startPolling();
+            } else {
+              // Error - show error message or reload page
+              if (contentType.includes('text/html')) {
+                // HTML error response - reload to show error
+                window.location.reload();
+              } else {
+                // Try to parse as JSON for error message
+                try {
+                  const errorData = await response.json();
+                  showStatus('❌ ' + (errorData.message || 'An error occurred. Please try again.'), 'error');
+                } catch {
+                  showStatus('❌ An error occurred. Please try again.', 'error');
+                }
+                submitBtn.disabled = false;
+              }
+            }
+          } catch (error) {
+            console.error('Submit error:', error);
+            showStatus('❌ Network error. Please try again.', 'error');
+            submitBtn.disabled = false;
+          }
+        });
+      })();
+    </script>
   </body>
 </html>
 
