@@ -47,7 +47,7 @@ class PlayerScreen(Screen):
 
             text = "🎮 *Player Controls*\n\n"
 
-            if status["is_playing"]:
+            if status["current_file"]:
                 # Show current playback info
                 filename = (
                     Path(status["current_file"]).name if status.get("current_file") else "Unknown"
