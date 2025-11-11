@@ -219,7 +219,7 @@ class LibraryScreen(Screen):
 
         elif query.data.startswith(LIBRARY_PLAY_MOVIE):
             movie_id = query.data[len(LIBRARY_PLAY_MOVIE) :]
-            await self._play_movie(query, movie_id)
+            return await self._play_movie(query, movie_id)
 
     async def _scan_library(
         self,

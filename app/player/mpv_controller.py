@@ -421,6 +421,20 @@ class MPVController:
         """
         return self._is_playing
 
+    async def is_paused(self) -> bool:
+        """Check if playback is paused.
+
+        Returns:
+            True if paused
+        """
+        if not self._player:
+            return False
+
+        try:
+            return bool(self._player.pause)
+        except Exception:
+            return False
+
     def get_current_file(self) -> Path | None:
         """Get currently playing file.
 
@@ -437,6 +451,7 @@ class MPVController:
         """
         return {
             "is_playing": self._is_playing,
+            "is_paused": await self.is_paused(),
             "current_file": str(self._current_file) if self._current_file else None,
             "position": await self.get_position(),
             "duration": await self.get_duration(),

@@ -9,6 +9,7 @@ from app.bot.callback_data import (
     PLAYER_BACK,
     PLAYER_LIBRARY,
     PLAYER_PAUSE,
+    PLAYER_RESUME,
     PLAYER_SEEK,
     PLAYER_STOP,
     PLAYER_VOL_DOWN,
@@ -52,7 +53,12 @@ class PlayerScreen(Screen):
                 filename = (
                     Path(status["current_file"]).name if status.get("current_file") else "Unknown"
                 )
-                text += f"▶️ *Playing:*\n{filename}\n\n"
+                is_paused = status.get("is_paused", False)
+                
+                if is_paused:
+                    text += f"⏸ *Paused:*\n{filename}\n\n"
+                else:
+                    text += f"▶️ *Playing:*\n{filename}\n\n"
 
                 if status.get("position") is not None and status.get("duration") is not None:
                     progress_pct = (
@@ -73,10 +79,16 @@ class PlayerScreen(Screen):
                 volume = status.get("volume", 0)
                 text += f"Volume: {volume}%\n"
 
-                # Playback control buttons
+                # Playback control buttons - show pause or resume based on state
+                pause_resume_button = (
+                    InlineKeyboardButton("▶️ Resume", callback_data=PLAYER_RESUME)
+                    if is_paused
+                    else InlineKeyboardButton("⏸ Pause", callback_data=PLAYER_PAUSE)
+                )
+                
                 keyboard = [
                     [
-                        InlineKeyboardButton("⏸ Pause", callback_data=PLAYER_PAUSE),
+                        pause_resume_button,
                         InlineKeyboardButton("⏹ Stop", callback_data=PLAYER_STOP),
                     ],
                     [
@@ -141,6 +153,10 @@ class PlayerScreen(Screen):
         elif query.data == PLAYER_PAUSE:
             success = await self.player.pause()
             await query.answer("⏸ Paused" if success else "Failed")
+
+        elif query.data == PLAYER_RESUME:
+            success = await self.player.resume()
+            await query.answer("▶️ Resumed" if success else "Failed")
 
         elif query.data == PLAYER_STOP:
             success = await self.player.stop()
