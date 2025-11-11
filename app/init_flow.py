@@ -670,7 +670,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
             error = connect_result.stderr.strip() or "Failed to connect to the provided Wi-Fi network."
             print(f"[init] Wi-Fi connect failed: {error}")
             # Make sure hotspot stays active so the user can retry
-            print("nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password)
+            print("Reconnecting after wrong creds\n", "nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password)
             subprocess.run(
                 ["nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password],
                 check=False,
@@ -724,6 +724,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            print("Hosting hotspot\n", "nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password)
             result = subprocess.run(
                 ["nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password],
                 check=False,
