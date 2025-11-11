@@ -172,18 +172,29 @@ async def _start_web_server(
         
         # Reset status and start connection in background
         connection_status["status"] = "connecting"
-        connection_status["message"] = None
+        connection_status["message"] = "Initializing connection..."
         
         async def connect_async():
-            """Run connection in background task."""
+            """Run connection in background task with status updates."""
             try:
-                success, error_msg = await on_token_saved(token, wifi_ssid, wifi_password)
-                if success:
-                    connection_status["status"] = "success"
-                    connection_status["message"] = None
-                else:
-                    connection_status["status"] = "error"
-                    connection_status["message"] = error_msg or "Could not connect to the Wi‑Fi network."
+                # Create wrapper that updates connection_status
+                async def on_token_saved_with_status(t, ssid, pwd):
+                    # Update status during connection
+                    connection_status["status"] = "connecting"
+                    connection_status["message"] = "Connecting to Wi‑Fi network..."
+                    
+                    result = await on_token_saved(t, ssid, pwd)
+                    
+                    if result[0]:  # success
+                        connection_status["status"] = "success"
+                        connection_status["message"] = None
+                    else:  # error
+                        connection_status["status"] = "error"
+                        connection_status["message"] = result[1] or "Could not connect to the Wi‑Fi network."
+                    
+                    return result
+                
+                await on_token_saved_with_status(token, wifi_ssid, wifi_password)
             except Exception as e:
                 connection_status["status"] = "error"
                 connection_status["message"] = f"Connection error: {str(e)}"
@@ -660,22 +671,33 @@ async def ensure_telegram_token(force: bool = False) -> None:
     async def on_token_saved(token: str, wifi_ssid: str, wifi_password: str) -> tuple[bool, Optional[str]]:
         nonlocal mpv_proc, setup_completed, current_ap_ssid, current_ap_password
         wifi_iface = _detect_wifi_interface() or "wlan0"
-        connect_result = subprocess.run(
-            ["nmcli", "dev", "wifi", "connect", wifi_ssid, "password", wifi_password, "ifname", wifi_iface],
-            check=False,
-            capture_output=True,
-            text=True,
+        
+        # Run subprocess in executor to avoid blocking the event loop
+        loop = asyncio.get_event_loop()
+        connect_result = await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                ["nmcli", "dev", "wifi", "connect", wifi_ssid, "password", wifi_password, "ifname", wifi_iface],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,  # 30 second timeout
+            )
         )
+        
         if connect_result.returncode != 0:
-            error = connect_result.stderr.strip() or "Failed to connect to the provided Wi-Fi network."
-            print(f"[init] Wi-Fi connect failed: {error}")
+            error = connect_result.stderr.strip() or "Failed to connect to the provided Wi‑Fi network."
+            print(f"[init] Wi‑Fi connect failed: {error}")
             # Make sure hotspot stays active so the user can retry
             print("Reconnecting after wrong creds\n", "nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password)
-            subprocess.run(
-                ["nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+            await loop.run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    ["nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
             )
             return False, error
 
@@ -695,7 +717,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
         os.environ["WIFI_PASSWORD"] = wifi_password
 
         setup_completed = True
-        print("[init] Wi-Fi connection established successfully.")
+        print("[init] Wi‑Fi connection established successfully.")
 
         if mpv_proc and mpv_proc.poll() is None:
             with suppress(Exception):

@@ -274,6 +274,10 @@
                 showStatus('❌ ' + (data.message || 'Connection failed. Please check your credentials.'), 'error');
                 submitBtn.disabled = false;
               } else if (data.status === 'connecting') {
+                const message = data.message || 'Connecting to Wi‑Fi network...';
+                showStatus('<span class="spinner"></span>' + message, 'connecting');
+              } else {
+                // Still connecting, show default message
                 showStatus('<span class="spinner"></span>Connecting to Wi‑Fi network...', 'connecting');
               }
             } catch (error) {
