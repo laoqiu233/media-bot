@@ -147,6 +147,51 @@ async def _start_web_server(
             content_type="application/json"
         )
 
+    async def handle_scan_wifi(_request: web.Request) -> web.Response:
+        """Scan for available Wi‑Fi networks and return as JSON."""
+        wifi_iface = _detect_wifi_interface() or "wlan0"
+        networks = []
+        
+        try:
+            # Run nmcli scan in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+            scan_result = await loop.run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+            )
+            
+            if scan_result.returncode == 0 and scan_result.stdout:
+                seen_ssids = set()
+                for line in scan_result.stdout.strip().splitlines():
+                    parts = line.split(":")
+                    if len(parts) >= 2:
+                        ssid = parts[0].strip()
+                        if ssid and ssid != "--" and ssid not in seen_ssids:
+                            seen_ssids.add(ssid)
+                            signal = parts[1].strip() if len(parts) > 1 else "0"
+                            security = parts[2].strip() if len(parts) > 2 else ""
+                            networks.append({
+                                "ssid": ssid,
+                                "signal": signal,
+                                "security": security,
+                            })
+                
+                # Sort by signal strength (descending)
+                networks.sort(key=lambda x: int(x.get("signal", 0)), reverse=True)
+        except Exception as e:
+            print(f"[init] Wi‑Fi scan error: {e}")
+        
+        return web.Response(
+            text=json.dumps({"networks": networks}),
+            content_type="application/json"
+        )
+
     async def handle_success(_request: web.Request) -> web.Response:
         """Show success page."""
         html_content = _render_template("setup_success.html")
@@ -154,9 +199,9 @@ async def _start_web_server(
 
     async def handle_submit(request: web.Request) -> web.Response:
         data = await request.post()
-        token = (data.get("token") or "").strip()
-        wifi_ssid = (data.get("wifi_ssid") or "").strip()
-        wifi_password = (data.get("wifi_password") or "").strip()
+        token = (data.get("token") or "")
+        wifi_ssid = (data.get("wifi_ssid") or "")
+        wifi_password = (data.get("wifi_password") or "")
         
         # Validate input
         if wifi_ssid == '' or wifi_password == '' or token == '':
@@ -215,6 +260,7 @@ async def _start_web_server(
     app.router.add_post("/submit", handle_submit)
     app.router.add_get("/status", handle_status)
     app.router.add_get("/success", handle_success)
+    app.router.add_get("/scan-wifi", handle_scan_wifi)
 
     runner = web.AppRunner(app)
     await runner.setup()
