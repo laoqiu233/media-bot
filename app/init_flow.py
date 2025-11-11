@@ -226,12 +226,12 @@ def _render_template(template_name: str, **replacements: str) -> str:
     return re.sub(r"\{\{[A-Z0-9_]+\}\}", "", html)
 
 def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_path: Path) -> None:
-    """Create a composite image with two QRs: Wi‑Fi join and setup URL, plus brief text."""
-    # Generate QR codes with better error correction and border
+    """Create a beautiful composite image with two QRs optimized for mobile scanning."""
+    # Generate QR codes with high error correction for mobile scanning
     qr_factory = qrcode.QRCode(
         version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_M,
-        box_size=10,
+        error_correction=qrcode.constants.ERROR_CORRECT_H,  # High error correction for mobile
+        box_size=12,
         border=4,
     )
     qr_factory.add_data(_wifi_qr_payload(ap_ssid, ap_password))
@@ -240,66 +240,92 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     
     qr_factory = qrcode.QRCode(
         version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_M,
-        box_size=10,
+        error_correction=qrcode.constants.ERROR_CORRECT_H,  # High error correction for mobile
+        box_size=12,
         border=4,
     )
     qr_factory.add_data(setup_url)
     qr_factory.make(fit=True)
     url_qr = qr_factory.make_image(fill_color="black", back_color="white").convert("RGB")
     
-    # Improved sizing and layout
-    qr_size = 400
+    # Mobile-optimized sizing (larger QR codes for easier scanning)
+    qr_size = 480
     url_qr = url_qr.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
     wifi_qr = wifi_qr.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
     
-    # Better spacing and layout
-    padding = 40
-    section_padding = 30
-    title_height = 80
-    label_height = 50
-    text_height = 100
-    qr_spacing = 40
+    # Beautiful spacing and layout
+    padding = 50
+    section_padding = 35
+    title_height = 100
+    label_height = 60
+    text_height = 120
+    qr_spacing = 50
+    card_padding = 20
+    corner_radius = 24
     
     width = padding * 2 + qr_size * 2 + qr_spacing
     height = padding * 2 + title_height + qr_size + label_height + text_height + section_padding
     
-    # Modern dark background with subtle gradient effect
-    # Use a more efficient approach for gradient
-    img = Image.new("RGB", (width, height), color=(15, 23, 42))
+    # Create base image with beautiful gradient background
+    img = Image.new("RGB", (width, height), color=(10, 10, 20))
     draw = ImageDraw.Draw(img)
     
-    # Add subtle gradient background (optimized - draw every 4 pixels)
-    for y in range(0, height, 4):
+    # Beautiful multi-color gradient background
+    # Top to bottom gradient: deep purple -> dark blue -> dark teal
+    for y in range(height):
         ratio = y / height if height > 0 else 0
-        r = int(15 + (20 - 15) * ratio)
-        g = int(23 + (30 - 23) * ratio)
-        b = int(42 + (50 - 42) * ratio)
-        draw.rectangle([(0, y), (width, min(y + 4, height))], fill=(r, g, b))
+        # Smooth color transition
+        r = int(10 + (15 - 10) * ratio + 5 * (1 - abs(ratio - 0.5) * 2))
+        g = int(10 + (20 - 10) * ratio + 8 * (1 - abs(ratio - 0.5) * 2))
+        b = int(20 + (35 - 20) * ratio + 10 * (1 - abs(ratio - 0.5) * 2))
+        draw.line([(0, y), (width, y)], fill=(r, g, b))
+    
+    # Add radial gradient overlay for depth (center glow effect)
+    center_x, center_y = width // 2, height // 2
+    max_radius = int((width ** 2 + height ** 2) ** 0.5)
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    
+    # Create radial glow
+    for radius in range(max_radius, 0, -10):
+        alpha = int(15 * (1 - radius / max_radius))
+        if alpha > 0:
+            overlay_draw.ellipse(
+                [center_x - radius, center_y - radius, center_x + radius, center_y + radius],
+                fill=(100, 150, 255, alpha)
+            )
+    
+    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+    draw = ImageDraw.Draw(img)
     
     # Load fonts with better fallbacks
     try:
-        font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", 32)
-        font_label = ImageFont.truetype("DejaVuSans-Bold.ttf", 22)
-        font_text = ImageFont.truetype("DejaVuSans.ttf", 20)
+        font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", 38)
+        font_label = ImageFont.truetype("DejaVuSans-Bold.ttf", 26)
+        font_text = ImageFont.truetype("DejaVuSans.ttf", 22)
     except Exception:
         try:
-            font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 32)
-            font_label = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 22)
-            font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
+            font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 38)
+            font_label = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)
+            font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 22)
         except Exception:
             font_title = ImageFont.load_default()
             font_label = ImageFont.load_default()
             font_text = ImageFont.load_default()
     
-    # Title with better positioning
+    # Beautiful title with glow effect
     title_text = "Media Bot Setup"
     title_bbox = draw.textbbox((0, 0), title_text, font=font_title)
     title_width = title_bbox[2] - title_bbox[0]
     title_x = (width - title_width) // 2
-    draw.text((title_x, padding), title_text, fill=(255, 255, 255), font=font_title)
+    title_y = padding
     
-    # Add QR code labels above each QR
+    # Draw title shadow for depth (dark semi-transparent)
+    draw.text((title_x + 2, title_y + 2), title_text, fill=(0, 0, 0), font=font_title)
+    # Draw main title
+    draw.text((title_x, title_y), title_text, fill=(255, 255, 255), font=font_title)
+    
+    # Add QR code labels with beautiful styling
     wifi_label = "1. Join Wi‑Fi"
     url_label = "2. Open Setup"
     
@@ -311,54 +337,103 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     url_label_width = url_label_bbox[2] - url_label_bbox[0]
     url_label_x = padding + qr_size + qr_spacing + (qr_size - url_label_width) // 2
     
-    label_y = padding + title_height + 10
-    draw.text((wifi_label_x, label_y), wifi_label, fill=(148, 163, 184), font=font_label)
-    draw.text((url_label_x, label_y), url_label, fill=(148, 163, 184), font=font_label)
+    label_y = padding + title_height + 15
     
-    # Paste QR codes with white borders
-    qr_y = padding + title_height + label_height + 10
+    # Draw label shadows
+    draw.text((wifi_label_x + 1, label_y + 1), wifi_label, fill=(0, 0, 0), font=font_label)
+    draw.text((url_label_x + 1, label_y + 1), url_label, fill=(0, 0, 0), font=font_label)
+    # Draw main labels with accent color
+    draw.text((wifi_label_x, label_y), wifi_label, fill=(148, 200, 255), font=font_label)
+    draw.text((url_label_x, label_y), url_label, fill=(148, 200, 255), font=font_label)
+    
+    # Calculate QR code positions
+    qr_y = padding + title_height + label_height + 20
     wifi_qr_x = padding
     url_qr_x = padding + qr_size + qr_spacing
     
-    # Add white border around QR codes
-    border_width = 8
-    draw.rectangle(
-        [wifi_qr_x - border_width, qr_y - border_width, 
-         wifi_qr_x + qr_size + border_width, qr_y + qr_size + border_width],
-        fill="white", outline="white", width=border_width
-    )
-    draw.rectangle(
-        [url_qr_x - border_width, qr_y - border_width,
-         url_qr_x + qr_size + border_width, qr_y + qr_size + border_width],
-        fill="white", outline="white", width=border_width
-    )
+    # Create beautiful card containers for QR codes with rounded corners
+    # We'll use a white background with shadow effect
+    card_border = 16
+    shadow_offset = 8
     
+    # Create shadow layer for QR cards
+    shadow_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow_layer)
+    
+    # Draw shadow for WiFi QR card (semi-transparent black)
+    wifi_shadow_rect = [
+        wifi_qr_x - card_border + shadow_offset,
+        qr_y - card_border + shadow_offset,
+        wifi_qr_x + qr_size + card_border + shadow_offset,
+        qr_y + qr_size + card_border + shadow_offset
+    ]
+    shadow_draw.rectangle(wifi_shadow_rect, fill=(0, 0, 0, 120))
+    
+    # Draw shadow for URL QR card
+    url_shadow_rect = [
+        url_qr_x - card_border + shadow_offset,
+        qr_y - card_border + shadow_offset,
+        url_qr_x + qr_size + card_border + shadow_offset,
+        qr_y + qr_size + card_border + shadow_offset
+    ]
+    shadow_draw.rectangle(url_shadow_rect, fill=(0, 0, 0, 120))
+    
+    # Composite shadow layer
+    img = Image.alpha_composite(img.convert("RGBA"), shadow_layer).convert("RGB")
+    draw = ImageDraw.Draw(img)
+    
+    # Draw WiFi QR card background (white)
+    wifi_card_rect = [
+        wifi_qr_x - card_border,
+        qr_y - card_border,
+        wifi_qr_x + qr_size + card_border,
+        qr_y + qr_size + card_border
+    ]
+    draw.rectangle(wifi_card_rect, fill=(255, 255, 255))
+    
+    # Draw URL QR card background
+    url_card_rect = [
+        url_qr_x - card_border,
+        qr_y - card_border,
+        url_qr_x + qr_size + card_border,
+        qr_y + qr_size + card_border
+    ]
+    draw.rectangle(url_card_rect, fill=(255, 255, 255))
+    
+    # Paste QR codes on white backgrounds
     img.paste(wifi_qr, (wifi_qr_x, qr_y))
     img.paste(url_qr, (url_qr_x, qr_y))
     
-    # Improved text below QR codes
+    # Beautiful text below QR codes with better styling
     text_y = qr_y + qr_size + section_padding
     wifi_text = f"SSID: {ap_ssid}\nPassword: {ap_password}"
     url_text = f"URL:\n{setup_url}"
     
-    # Center text under each QR
+    # Center text under each QR with shadows
     wifi_text_lines = wifi_text.split("\n")
     url_text_lines = url_text.split("\n")
     
-    line_height = 28
+    line_height = 32
     for i, line in enumerate(wifi_text_lines):
         line_bbox = draw.textbbox((0, 0), line, font=font_text)
         line_width = line_bbox[2] - line_bbox[0]
         line_x = wifi_qr_x + (qr_size - line_width) // 2
-        draw.text((line_x, text_y + i * line_height), line, fill=(203, 213, 225), font=font_text)
+        # Text shadow
+        draw.text((line_x + 1, text_y + i * line_height + 1), line, fill=(0, 0, 0), font=font_text)
+        # Main text
+        draw.text((line_x, text_y + i * line_height), line, fill=(220, 230, 245), font=font_text)
     
     for i, line in enumerate(url_text_lines):
         line_bbox = draw.textbbox((0, 0), line, font=font_text)
         line_width = line_bbox[2] - line_bbox[0]
         line_x = url_qr_x + (qr_size - line_width) // 2
-        draw.text((line_x, text_y + i * line_height), line, fill=(203, 213, 225), font=font_text)
+        # Text shadow
+        draw.text((line_x + 1, text_y + i * line_height + 1), line, fill=(0, 0, 0), font=font_text)
+        # Main text
+        draw.text((line_x, text_y + i * line_height), line, fill=(220, 230, 245), font=font_text)
     
-    img.save(out_path, quality=95)
+    # Save with high quality
+    img.save(out_path, quality=98, optimize=True)
 
 async def _display_with_mpv(image_path: Path) -> subprocess.Popen:
     """Launch mpv to display the provided image fullscreen in a loop."""
