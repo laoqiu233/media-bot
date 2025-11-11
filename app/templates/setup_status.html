@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Media Bot — Connecting</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(140deg, #0f172a 0%, #1e293b 48%, #0b1120 100%);
+        color: #e2e8f0;
+      }
+      .card {
+        width: min(90vw, 520px);
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-radius: 18px;
+        padding: 2.2rem;
+        background: rgba(15, 23, 42, 0.92);
+        box-shadow: 0 24px 55px rgba(2, 6, 23, 0.6);
+        text-align: center;
+      }
+      h1 {
+        font-size: clamp(1.5rem, 1.8vw + 1rem, 2rem);
+        margin: 0 0 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+      }
+      .status {
+        color: #cbd5f5;
+        line-height: 1.6;
+        margin-bottom: 1.35rem;
+        font-size: 1.05rem;
+      }
+      .spinner {
+        border: 3px solid rgba(34, 211, 238, 0.2);
+        border-top: 3px solid #22d3ee;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 1.5rem;
+      }
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      .error {
+        background: rgba(239, 68, 68, 0.12);
+        border: 1px solid rgba(248, 113, 113, 0.35);
+        color: #fee2e2;
+        padding: 0.9rem 1rem;
+        border-radius: 12px;
+        margin-bottom: 0.8rem;
+        line-height: 1.4;
+        text-align: left;
+      }
+      .success {
+        background: rgba(34, 211, 238, 0.12);
+        border: 1px solid rgba(34, 211, 238, 0.35);
+        color: #cffafe;
+        padding: 0.9rem 1rem;
+        border-radius: 12px;
+        margin-bottom: 0.8rem;
+        line-height: 1.4;
+      }
+      @media (max-width: 520px) {
+        .card {
+          padding: 1.8rem 1.5rem;
+        }
+        h1 {
+          font-size: 1.4rem;
+        }
+        .status {
+          font-size: 0.95rem;
+          word-wrap: break-word;
+          overflow-wrap: break-word;
+        }
+        .error, .success {
+          font-size: 0.9rem;
+          padding: 0.8rem 0.9rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1 id="title">Connecting...</h1>
+      <div class="spinner" id="spinner"></div>
+      <div class="status" id="status">Saving credentials and connecting to Wi‑Fi...</div>
+      <div id="message"></div>
+    </div>
+    <script>
+      let pollCount = 0;
+      const maxPolls = 60; // 30 seconds max (0.5s intervals)
+      
+      async function pollStatus() {
+        try {
+          const response = await fetch('/status');
+          const data = await response.json();
+          
+          pollCount++;
+          
+          if (data.status === 'success') {
+            document.getElementById('spinner').style.display = 'none';
+            document.getElementById('title').textContent = '✅ Connected!';
+            document.getElementById('status').textContent = 'Successfully connected to Wi‑Fi and saved credentials.';
+            document.getElementById('message').innerHTML = '<div class="success">You can now disconnect from the setup hotspot and reconnect to your home Wi‑Fi. The bot will be available in Telegram shortly.</div>';
+            return;
+          } else if (data.status === 'error') {
+            document.getElementById('spinner').style.display = 'none';
+            document.getElementById('title').textContent = '❌ Connection Failed';
+            document.getElementById('status').textContent = 'Could not connect to Wi‑Fi network.';
+            document.getElementById('message').innerHTML = `<div class="error">${data.error || 'Please check your Wi‑Fi credentials and try again.'}</div>`;
+            return;
+          } else if (data.status === 'connecting') {
+            document.getElementById('status').textContent = data.message || 'Connecting...';
+          }
+          
+          if (pollCount < maxPolls) {
+            setTimeout(pollStatus, 500);
+          } else {
+            document.getElementById('spinner').style.display = 'none';
+            document.getElementById('title').textContent = '⏱ Timeout';
+            document.getElementById('status').textContent = 'Connection is taking longer than expected.';
+            document.getElementById('message').innerHTML = '<div class="error">The connection process may still be running. Please check your device or try again.</div>';
+          }
+        } catch (error) {
+          console.error('Polling error:', error);
+          if (pollCount < maxPolls) {
+            setTimeout(pollStatus, 500);
+          }
+        }
+      }
+      
+      // Start polling after a short delay
+      setTimeout(pollStatus, 500);
+    </script>
+  </body>
+</html>
+

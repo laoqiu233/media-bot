@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
@@ -170,9 +171,31 @@ def run_integrated_bot():
             # Handle all callback queries (button clicks)
             application.add_handler(CallbackQueryHandler(handlers.handle_callback))
 
+            # Mark bot as running for init flow
+            os.environ["MEDIA_BOT_RUNNING"] = "1"
+            
             # Start the bot (already initialized above)
             await application.start()
             await application.updater.start_polling()
+
+            # Background task to check for restart flag
+            async def check_restart_flag():
+                from pathlib import Path
+                restart_flag = Path(__file__).resolve().parents[2] / ".setup" / ".restart_needed"
+                while True:
+                    await asyncio.sleep(2)  # Check every 2 seconds
+                    if restart_flag.exists():
+                        logger.info("Restart flag detected. Restarting bot to apply credential changes...")
+                        # Clean up flag
+                        try:
+                            restart_flag.unlink()
+                        except Exception:
+                            pass
+                        # Restart by exiting - systemd or startup script should handle restart
+                        import sys
+                        sys.exit(0)
+            
+            restart_check_task = asyncio.create_task(check_restart_flag())
 
             # Keep the bot running
             try:
@@ -191,6 +214,13 @@ def run_integrated_bot():
         finally:
             # Cleanup
             logger.info("Shutting down...")
+            # Cancel restart check task
+            if 'restart_check_task' in locals():
+                restart_check_task.cancel()
+                try:
+                    await restart_check_task
+                except asyncio.CancelledError:
+                    pass
             if downloader:
                 downloader.stop_monitoring()
                 downloader.shutdown()
@@ -198,6 +228,8 @@ def run_integrated_bot():
                 player_controller.shutdown()
             if scheduler:
                 await scheduler.save_progress()
+            # Clear running flag
+            os.environ.pop("MEDIA_BOT_RUNNING", None)
             logger.info("Shutdown complete")
 
     # Run the async main function
