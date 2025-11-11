@@ -14,7 +14,7 @@ from app.library.imdb_client import IMDbClient
 from app.library.manager import LibraryManager
 from app.player.mpv_controller import player
 from app.scheduler.series_scheduler import get_scheduler
-from app.torrent.downloader import get_downloader
+from app.torrent.downloader import DownloadState, get_downloader
 from app.torrent.searcher import TorrentSearcher
 from app.tv.hdmi_cec import get_cec_controller
 
@@ -54,13 +54,18 @@ async def initialize_components():
     torrent_downloader = get_downloader(config)
 
     # Set up callback to import completed downloads to library
-    async def on_download_complete(task_id: str, download_info: dict):
-        """Import completed download to library."""
-        logger.info(f"Processing completed download: {download_info['name']}")
+    async def on_download_complete(task_id: str, state: DownloadState) -> None:
+        """Import completed download to library.
+
+        Args:
+            task_id: Download task ID
+            state: Download state with metadata
+        """
+        logger.info(f"Processing completed download: {state.name}")
         download_path = torrent_downloader.get_download_path(task_id)
         if download_path and download_path.exists():
             await library_manager.import_from_download(
-                download_path=download_path, torrent_name=download_info["name"]
+                download_path=download_path, torrent_name=state.name, metadata=state.metadata
             )
         else:
             logger.warning(f"Download path not found for task {task_id}")

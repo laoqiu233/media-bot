@@ -55,7 +55,7 @@ class PlayerScreen(Screen):
                     Path(status["current_file"]).name if status.get("current_file") else "Unknown"
                 )
                 is_paused = status.get("is_paused", False)
-                
+
                 if is_paused:
                     text += f"⏸ *Paused:*\n{filename}\n\n"
                 else:
@@ -86,7 +86,7 @@ class PlayerScreen(Screen):
                     if is_paused
                     else InlineKeyboardButton("⏸ Pause", callback_data=PLAYER_PAUSE)
                 )
-                
+
                 keyboard = [
                     [
                         pause_resume_button,

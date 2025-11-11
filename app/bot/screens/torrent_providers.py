@@ -5,7 +5,14 @@ import logging
 from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.bot.callback_data import MOVIE_BACK, PROVIDER_SELECT
-from app.bot.screens.base import Context, Navigation, RenderOptions, Screen, ScreenHandlerResult
+from app.bot.screens.base import (
+    Context,
+    Navigation,
+    RenderOptions,
+    Screen,
+    ScreenHandlerResult,
+    ScreenRenderResult,
+)
 from app.library.models import IMDbMovie
 
 logger = logging.getLogger(__name__)
@@ -23,13 +30,26 @@ class TorrentProvidersScreen(Screen):
 
         Expects kwargs:
             movie: IMDbMovie object
+            movies: List of all movies (for back navigation)
+            detailed_movies: Dict of detailed movie data (for back navigation)
+            query: Search query (for back navigation)
+            page: Current page (for back navigation)
         """
         movie = kwargs.get("movie")
-        context.update_context(selected_movie=movie)
+        movies = kwargs.get("movies", [])
+        detailed_movies = kwargs.get("detailed_movies", {})
+        query = kwargs.get("query", "")
+        page = kwargs.get("page", 0)
+        
+        context.update_context(
+            selected_movie=movie,
+            movies=movies,
+            detailed_movies=detailed_movies,
+            query=query,
+            page=page,
+        )
 
-    async def render(
-        self, context: Context
-    ) -> tuple[str, InlineKeyboardMarkup, RenderOptions]:
+    async def render(self, context: Context) -> ScreenRenderResult:
         """Render the provider selection screen."""
         state = context.get_context()
         movie: IMDbMovie | None = state.get("selected_movie")
@@ -77,20 +97,32 @@ class TorrentProvidersScreen(Screen):
         context: Context,
     ) -> ScreenHandlerResult:
         """Handle callback queries."""
+        state = context.get_context()
+        
         if query.data == MOVIE_BACK:
-            return Navigation(next_screen="movie_selection")
+            # Pass back the movie list context for proper restoration
+            return Navigation(
+                next_screen="movie_selection",
+                movies=state.get("movies", []),
+                detailed_movies=state.get("detailed_movies", {}),
+                query=state.get("query", ""),
+                page=state.get("page", 0),
+            )
 
         elif query.data.startswith(PROVIDER_SELECT):
             provider = query.data[len(PROVIDER_SELECT) :]
-            movie: IMDbMovie = context.get_context().get("selected_movie")
+            movie: IMDbMovie = state.get("selected_movie")
 
             if movie:
                 await query.answer(f"Searching {provider.upper()}...", show_alert=False)
 
-                # Navigate to torrent results with movie and provider
+                # Navigate to torrent results with movie, provider, and context for back navigation
                 return Navigation(
                     next_screen="torrent_results",
                     movie=movie,
                     provider=provider,
+                    movies=state.get("movies", []),
+                    detailed_movies=state.get("detailed_movies", {}),
+                    query=state.get("query", ""),
+                    movie_page=state.get("page", 0),
                 )
-

@@ -583,7 +583,7 @@ async def handler(update, context):
 - `description`: Plot description
 - `media_type`: MediaType enum
 - `file_path`: Path to video file
-- `poster_path`: Path to poster image
+- `poster_url`: HTTP URL to poster image
 - `duration`: Duration in seconds
 - `quality`: VideoQuality enum
 - `file_size`: Size in bytes
@@ -611,7 +611,7 @@ async def handler(update, context):
 - `year`: First air year
 - `genres`: List[Genre]
 - `description`: Series description
-- `poster_path`: Poster image path
+- `poster_url`: HTTP URL to poster image
 - `status`: "ongoing" or "ended"
 - `total_seasons`: Season count
 - `total_episodes`: Episode count

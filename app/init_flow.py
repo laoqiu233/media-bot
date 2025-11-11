@@ -15,22 +15,26 @@ import socket
 import subprocess
 import sys
 from pathlib import Path
+<<<<<<< HEAD
 from typing import Optional
 import re
 import html
+=======
+>>>>>>> 6bd26d8 (fix library downloads)
 
-from aiohttp import web
 import qrcode
+from aiohttp import web
 from PIL import Image, ImageDraw, ImageFont
-import logging
 
 
 def _project_root() -> Path:
     # app/ -> project root
     return Path(__file__).resolve().parents[1]
 
+
 def _templates_dir() -> Path:
     return Path(__file__).resolve().parent / "templates"
+
 
 def _detect_local_ip() -> str:
     """Detect a likely reachable local IP address."""
@@ -42,23 +46,26 @@ def _detect_local_ip() -> str:
     except Exception:
         return "127.0.0.1"
 
-def _detect_interface_ip(interface_name: str) -> Optional[str]:
+
+def _detect_interface_ip(interface_name: str) -> str | None:
     """Try to detect IP bound to a specific interface (e.g., wlan0/wlp2s0/wlo1)."""
     try:
         import fcntl
         import struct
+
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         return socket.inet_ntoa(
             fcntl.ioctl(
                 s.fileno(),
                 0x8915,  # SIOCGIFADDR
-                struct.pack('256s', bytes(interface_name[:15], 'utf-8'))
+                struct.pack("256s", bytes(interface_name[:15], "utf-8")),
             )[20:24]
         )
     except Exception:
         return None
 
-def _detect_wifi_interface() -> Optional[str]:
+
+def _detect_wifi_interface() -> str | None:
     """Detect a Wi‑Fi interface name using nmcli or /sys/class/net."""
     # Prefer nmcli when available
     try:
@@ -86,6 +93,7 @@ def _detect_wifi_interface() -> Optional[str]:
         pass
     return None
 
+
 def _wifi_qr_payload(ssid: str, password: str, security: str = "WPA") -> str:
     # WIFI:T:WPA;S:mynetwork;P:mypass;;
     escaped_ssid = ssid.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
@@ -93,15 +101,21 @@ def _wifi_qr_payload(ssid: str, password: str, security: str = "WPA") -> str:
     return f"WIFI:T:{security};S:{escaped_ssid};P:{escaped_pwd};;"
 
 
-async def _start_web_server(host: str, port: int, on_token_saved, ap_ssid: str, ap_password: str) -> tuple[web.AppRunner, int]:
+async def _start_web_server(
+    host: str, port: int, on_token_saved, ap_ssid: str, ap_password: str
+) -> tuple[web.AppRunner, int]:
     """Start a minimal aiohttp server that serves a token form and handles submission.
-    
+
     Returns:
         (runner, actual_port)
     """
+<<<<<<< HEAD
     # Shared state for connection status tracking
     connection_status: dict[str, str | None] = {"status": None, "message": None}
     
+=======
+
+>>>>>>> 6bd26d8 (fix library downloads)
     # Very lightweight request logging
     @web.middleware
     async def log_requests(request, handler):
@@ -206,10 +220,10 @@ async def _start_web_server(host: str, port: int, on_token_saved, ap_ssid: str, 
     sockets = getattr(site._server, "sockets", None)  # type: ignore[attr-defined]
     actual_port = port
     if sockets:
-        try:
+        from contextlib import suppress
+
+        with suppress(Exception):
             actual_port = sockets[0].getsockname()[1]
-        except Exception:
-            pass
     print(f"[http] server listening on {host}:{actual_port}")
     return runner, actual_port
 
@@ -218,12 +232,45 @@ def _generate_qr_png(content: str, out_path: Path) -> None:
     img = qrcode.make(content)
     img.save(out_path)
 
+<<<<<<< HEAD
 def _render_template(template_name: str, **replacements: str) -> str:
     html = (_templates_dir() / template_name).read_text(encoding="utf-8")
     for key, value in replacements.items():
         html = html.replace(f"{{{{{key}}}}}", value)
     # Strip any unreplaced placeholders like {{SOME_TOKEN}}
     return re.sub(r"\{\{[A-Z0-9_]+\}\}", "", html)
+=======
+
+def _generate_url_qr_with_caption(setup_url: str, out_path: Path, note: str | None = None) -> None:
+    """Generate a single QR for the setup URL with a short caption."""
+    qr_img = qrcode.make(setup_url).convert("RGB")
+    qr_size = 420
+    qr_img = qr_img.resize((qr_size, qr_size))
+    padding = 24
+    title_height = 60
+    text_height = 60
+    canvas_h = padding * 3 + title_height + qr_size + (text_height if note else 0)
+    canvas_w = padding * 2 + qr_size
+    img = Image.new("RGB", (canvas_w, canvas_h), color=(18, 18, 18))
+    draw = ImageDraw.Draw(img)
+    try:
+        font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", 26)
+        font_text = ImageFont.truetype("DejaVuSans.ttf", 18)
+    except Exception:
+        font_title = ImageFont.load_default()
+        font_text = ImageFont.load_default()
+    draw.text((padding, padding), "Media Bot Setup", fill=(230, 230, 230), font=font_title)
+    img.paste(qr_img, (padding, padding + title_height))
+    if note:
+        draw.text(
+            (padding, padding * 2 + title_height + qr_size),
+            note,
+            fill=(220, 220, 220),
+            font=font_text,
+        )
+    img.save(out_path)
+>>>>>>> 6bd26d8 (fix library downloads)
+
 
 def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_path: Path) -> None:
     """Create a beautiful composite image with two QRs optimized for mobile scanning."""
@@ -269,6 +316,7 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     # Create base image with beautiful gradient background
     img = Image.new("RGB", (width, height), color=(10, 10, 20))
     draw = ImageDraw.Draw(img)
+<<<<<<< HEAD
     
     # Beautiful multi-color gradient background
     # Top to bottom gradient: deep purple -> dark blue -> dark teal
@@ -296,6 +344,47 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
             )
     
     img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+=======
+    try:
+        font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", 26)
+        font_text = ImageFont.truetype("DejaVuSans.ttf", 18)
+    except Exception:
+        font_title = ImageFont.load_default()
+        font_text = ImageFont.load_default()
+    draw.text((padding, padding), "Media Bot Setup", fill=(230, 230, 230), font=font_title)
+    img.paste(wifi_qr, (padding, padding + title_height))
+    img.paste(url_qr, (padding * 2 + qr_size, padding + title_height))
+    wifi_text = f"1) Join AP: {ap_ssid}  Pass: {ap_password}"
+    url_text = f"2) Open setup: {setup_url}"
+    draw.text(
+        (padding, padding * 2 + title_height + qr_size),
+        wifi_text,
+        fill=(220, 220, 220),
+        font=font_text,
+    )
+    draw.text(
+        (padding * 2 + qr_size, padding * 2 + title_height + qr_size),
+        url_text,
+        fill=(220, 220, 220),
+        font=font_text,
+    )
+    img.save(out_path)
+
+
+def _generate_wifi_qr_with_caption(
+    ap_ssid: str, ap_password: str, setup_url: str, out_path: Path
+) -> None:
+    """Generate a single Wi‑Fi QR (join AP) with caption including the setup URL."""
+    wifi_qr = qrcode.make(_wifi_qr_payload(ap_ssid, ap_password)).convert("RGB")
+    qr_size = 420
+    wifi_qr = wifi_qr.resize((qr_size, qr_size))
+    padding = 24
+    title_height = 60
+    text_height = 80
+    width = padding * 2 + qr_size
+    height = padding * 3 + title_height + qr_size + text_height
+    img = Image.new("RGB", (width, height), color=(18, 18, 18))
+>>>>>>> 6bd26d8 (fix library downloads)
     draw = ImageDraw.Draw(img)
     
     # Load fonts with better fallbacks
@@ -304,6 +393,7 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
         font_label = ImageFont.truetype("DejaVuSans-Bold.ttf", 26)
         font_text = ImageFont.truetype("DejaVuSans.ttf", 22)
     except Exception:
+<<<<<<< HEAD
         try:
             font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 38)
             font_label = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)
@@ -434,6 +524,21 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     
     # Save with high quality
     img.save(out_path, quality=98, optimize=True)
+=======
+        font_title = ImageFont.load_default()
+        font_text = ImageFont.load_default()
+    draw.text((padding, padding), "Media Bot Setup", fill=(230, 230, 230), font=font_title)
+    img.paste(wifi_qr, (padding, padding + title_height))
+    caption = f"Join Wi‑Fi: {ap_ssid}  Pass: {ap_password}\nThen open: {setup_url}"
+    draw.text(
+        (padding, padding * 2 + title_height + qr_size),
+        caption,
+        fill=(220, 220, 220),
+        font=font_text,
+    )
+    img.save(out_path)
+>>>>>>> 6bd26d8 (fix library downloads)
+
 
 async def _display_with_mpv(image_path: Path) -> subprocess.Popen:
     """Launch mpv to display the provided image fullscreen in a loop."""
@@ -479,7 +584,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
     host_ip = _detect_local_ip()
     desired_port = 8765
 
-    mpv_proc: Optional[subprocess.Popen] = None
+    mpv_proc: subprocess.Popen | None = None
     mpv_failed = False
     setup_completed = False
     current_ap_ssid = os.getenv("SETUP_AP_SSID", "media-bot-setup")
@@ -521,14 +626,36 @@ async def ensure_telegram_token(force: bool = False) -> None:
         os.environ["WIFI_SSID"] = wifi_ssid
         os.environ["WIFI_PASSWORD"] = wifi_password
 
+<<<<<<< HEAD
         setup_completed = True
         print("[init] Wi-Fi connection established successfully.")
+=======
+        # Try to connect to provided Wi‑Fi
+        from contextlib import suppress
+
+        wifi_iface = _detect_wifi_interface() or "wlan0"
+        with suppress(Exception):
+            subprocess.run(
+                [
+                    "nmcli",
+                    "dev",
+                    "wifi",
+                    "connect",
+                    wifi_ssid,
+                    "password",
+                    wifi_password,
+                    "ifname",
+                    wifi_iface,
+                ],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+>>>>>>> 6bd26d8 (fix library downloads)
 
         if mpv_proc and mpv_proc.poll() is None:
-            try:
+            with suppress(Exception):
                 mpv_proc.terminate()
-            except Exception:
-                pass
 
         return True, None
 
@@ -554,12 +681,27 @@ async def ensure_telegram_token(force: bool = False) -> None:
                 stderr=subprocess.DEVNULL,
             )
             result = subprocess.run(
+<<<<<<< HEAD
                 ["nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password],
+=======
+                [
+                    "nmcli",
+                    "dev",
+                    "wifi",
+                    "hotspot",
+                    "ifname",
+                    wifi_iface,
+                    "ssid",
+                    ap_ssid,
+                    "password",
+                    ap_password,
+                ],
+>>>>>>> 6bd26d8 (fix library downloads)
                 check=False,
                 capture_output=True,
                 text=True,
             )
-            if result.returncode != 0:  
+            if result.returncode != 0:
                 print(f"[init] nmcli hotspot error: {result.stderr.strip()}")
             else:
                 print(f"[init] nmcli hotspot started: {result.stdout.strip()}")
@@ -604,24 +746,33 @@ async def ensure_telegram_token(force: bool = False) -> None:
                     ["nmcli", "con", "modify", con_name, "wifi-sec.psk", current_ap_password],
                     # Disable MAC randomization to avoid reconnect loops on some devices
                     ["nmcli", "con", "modify", con_name, "wifi.mac-address-randomization", "0"],
-                    ["nmcli", "con", "modify", con_name, "802-11-wireless.cloned-mac-address", "preserve"],
+                    [
+                        "nmcli",
+                        "con",
+                        "modify",
+                        con_name,
+                        "802-11-wireless.cloned-mac-address",
+                        "preserve",
+                    ],
                     # Reduce powersave issues
                     ["nmcli", "con", "modify", con_name, "802-11-wireless.powersave", "2"],
                 ]:
                     r = subprocess.run(args, check=False, capture_output=True, text=True)
                     if r.returncode != 0:
-                        print(f"[init] nmcli modify warn: {' '.join(args[3:])} -> {r.stderr.strip()}")
+                        print(
+                            f"[init] nmcli modify warn: {' '.join(args[3:])} -> {r.stderr.strip()}"
+                        )
                 # Reload the connection to apply changes
                 r1 = subprocess.run(
-                    ["nmcli", "con", "down", con_name],
-                    check=False, capture_output=True, text=True
+                    ["nmcli", "con", "down", con_name], check=False, capture_output=True, text=True
                 )
                 r2 = subprocess.run(
-                    ["nmcli", "con", "up", con_name],
-                    check=False, capture_output=True, text=True
+                    ["nmcli", "con", "up", con_name], check=False, capture_output=True, text=True
                 )
-                if r1.returncode != 0: print(f"[init] nmcli down warn: {r1.stderr.strip()}")
-                if r2.returncode != 0: print(f"[init] nmcli up warn: {r2.stderr.strip()}")
+                if r1.returncode != 0:
+                    print(f"[init] nmcli down warn: {r1.stderr.strip()}")
+                if r2.returncode != 0:
+                    print(f"[init] nmcli up warn: {r2.stderr.strip()}")
         except Exception as e:
             print(f"Error creating hotspot: {e}")
             pass
@@ -639,9 +790,19 @@ async def ensure_telegram_token(force: bool = False) -> None:
 
         # Start server; if desired port is busy, fall back to ephemeral port 0
         try:
+<<<<<<< HEAD
             runner, bound_port = await _start_web_server("0.0.0.0", desired_port, on_token_saved, current_ap_ssid, current_ap_password)
         except OSError:
             runner, bound_port = await _start_web_server("0.0.0.0", 0, on_token_saved, current_ap_ssid, current_ap_password)
+=======
+            runner, bound_port = await _start_web_server(
+                "0.0.0.0", desired_port, on_token_saved, ap_ssid, ap_password
+            )
+        except OSError:
+            runner, bound_port = await _start_web_server(
+                "0.0.0.0", 0, on_token_saved, ap_ssid, ap_password
+            )
+>>>>>>> 6bd26d8 (fix library downloads)
         setup_url = f"http://{ap_ip}:{bound_port}/"
         print(setup_url)
         # Prepare QR image under project data dir
@@ -658,7 +819,10 @@ async def ensure_telegram_token(force: bool = False) -> None:
                 mpv_proc = await _display_with_mpv(qr_png)
             except FileNotFoundError:
                 mpv_failed = True
-                print(f"[init] mpv not found. Open this URL to configure: {setup_url}", file=sys.stderr)
+                print(
+                    f"[init] mpv not found. Open this URL to configure: {setup_url}",
+                    file=sys.stderr,
+                )
 
             # Wait until setup completes successfully
             while not setup_completed:
@@ -671,9 +835,13 @@ async def ensure_telegram_token(force: bool = False) -> None:
                 except Exception:
                     pass
 
+<<<<<<< HEAD
     try:
         await run_flow()
     finally:
         os.environ.pop("MEDIA_BOT_SETUP_ACTIVE", None)
 
 
+=======
+    await run_flow()
+>>>>>>> 6bd26d8 (fix library downloads)

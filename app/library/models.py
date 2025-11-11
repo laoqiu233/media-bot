@@ -53,7 +53,7 @@ class MediaItem(BaseModel):
     description: str | None = Field(None, description="Plot description")
     media_type: MediaType = Field(..., description="Type of media")
     file_path: Path | None = Field(None, description="Path to video file")
-    poster_path: Path | None = Field(None, description="Path to poster image")
+    poster_url: str | None = Field(None, description="HTTP URL to poster image")
     duration: int | None = Field(None, description="Duration in seconds")
     quality: VideoQuality = Field(default=VideoQuality.UNKNOWN, description="Video quality")
     file_size: int | None = Field(None, description="File size in bytes")
@@ -96,7 +96,7 @@ class Series(BaseModel):
     year: int | None = Field(None, description="First air year")
     genres: list[Genre] = Field(default_factory=list, description="List of genres")
     description: str | None = Field(None, description="Series description")
-    poster_path: Path | None = Field(None, description="Path to poster image")
+    poster_url: str | None = Field(None, description="HTTP URL to poster image")
     status: str = Field(default="unknown", description="Series status (ongoing/ended)")
     total_seasons: int = Field(default=0, description="Total number of seasons")
     total_episodes: int = Field(default=0, description="Total number of episodes")
@@ -151,6 +151,7 @@ class DownloadTask(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now, description="Task creation time")
     completed_at: datetime | None = Field(None, description="Completion time")
     error_message: str | None = Field(None, description="Error message if failed")
+    metadata: dict | None = Field(None, description="Additional metadata (e.g., IMDb data)")
 
 
 class UserWatchProgress(BaseModel):

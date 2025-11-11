@@ -1,8 +1,8 @@
 """Entry point for running app as a module with python -m app."""
 
-from app.bot.integrated_bot import run_integrated_bot
 import asyncio
-import os
+
+from app.bot.integrated_bot import run_integrated_bot
 from app.init_flow import ensure_telegram_token
 
 if __name__ == "__main__":

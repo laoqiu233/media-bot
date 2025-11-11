@@ -2,8 +2,11 @@
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 from py_rutracker import AsyncRuTrackerClient
 
@@ -16,6 +19,59 @@ from app.config import Config
 from app.library.models import DownloadTask
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class DownloadState:
+    """Internal download state including libtorrent handle."""
+
+    # Core download info
+    task_id: str
+    handle: Any  # libtorrent handle object
+    name: str
+    magnet_link: str
+    created_at: datetime
+    metadata: dict | None = None
+
+    # Runtime state (updated by monitoring loop)
+    status: str = "queued"
+    progress: float = 0.0
+    download_rate: float = 0.0
+    upload_rate: float = 0.0
+    num_seeds: int = 0
+    num_peers: int = 0
+    total_done: int = 0
+    total_wanted: int = 0
+    eta: int | None = None
+    completed_at: datetime | None = None
+
+    def to_download_task(self, save_path: Path) -> DownloadTask:
+        """Convert internal state to external DownloadTask model.
+
+        Args:
+            save_path: Download save path
+
+        Returns:
+            DownloadTask model
+        """
+        return DownloadTask(
+            id=self.task_id,
+            torrent_name=self.name,
+            magnet_link=self.magnet_link,
+            status=self.status,
+            progress=self.progress,
+            download_speed=self.download_rate,
+            upload_speed=self.upload_rate,
+            seeders=self.num_seeds,
+            peers=self.num_peers,
+            downloaded_bytes=self.total_done,
+            total_bytes=self.total_wanted,
+            eta=self.eta,
+            save_path=save_path,
+            created_at=self.created_at,
+            completed_at=self.completed_at,
+            metadata=self.metadata,
+        )
 
 
 class TorrentDownloader:
@@ -46,11 +102,11 @@ class TorrentDownloader:
         except (AttributeError, TypeError):
             # Fall back to older API (libtorrent 1.x)
             self.session = lt.session()
-            try:
-                self.session.listen_on(6881, 6891)
-            except AttributeError:
+            from contextlib import suppress
+
+            with suppress(AttributeError):
                 # Even older API
-                pass
+                self.session.listen_on(6881, 6891)
 
         # Add DHT routers
         try:
@@ -62,15 +118,17 @@ class TorrentDownloader:
             logger.warning("DHT router configuration not available in this libtorrent version")
 
         # Storage for active downloads
-        self.downloads: dict[str, dict] = {}
+        self.downloads: dict[str, DownloadState] = {}
         self._monitor_task: asyncio.Task | None = None
-        self._on_download_complete = None  # Callback for completed downloads
+        self._on_download_complete: Callable[[str, DownloadState], Awaitable[None]] | None = None
 
-    def set_completion_callback(self, callback):
+    def set_completion_callback(
+        self, callback: Callable[[str, DownloadState], Awaitable[None]]
+    ) -> None:
         """Set callback to be called when a download completes.
 
         Args:
-            callback: Async function(task_id, download_info)
+            callback: Async function that takes (task_id: str, state: DownloadState)
         """
         self._on_download_complete = callback
 
@@ -86,12 +144,17 @@ class TorrentDownloader:
             self._monitor_task.cancel()
             logger.info("Download monitoring stopped")
 
+<<<<<<< HEAD
     async def add_download(self, magnet_link: str | None, torrent_file_link: str | None, name: str) -> str:
+=======
+    async def add_download(self, magnet_link: str, name: str, metadata: dict | None = None) -> str:
+>>>>>>> 6bd26d8 (fix library downloads)
         """Add a new torrent download.
 
         Args:
             magnet_link: Magnet link
             name: Display name for the download
+            metadata: Optional metadata dict (e.g., IMDb movie data)
 
         Returns:
             Download task ID
@@ -127,6 +190,7 @@ class TorrentDownloader:
                     raise
                         
 
+<<<<<<< HEAD
             # Store download info
             self.downloads[task_id] = {
                 "handle": handle,
@@ -134,6 +198,17 @@ class TorrentDownloader:
                 "magnet_link": magnet_link if magnet_link is not None else torrent_file_link,
                 "created_at": datetime.now(),
             }
+=======
+            # Store download state
+            self.downloads[task_id] = DownloadState(
+                task_id=task_id,
+                handle=handle,
+                name=name,
+                magnet_link=magnet_link,
+                created_at=datetime.now(),
+                metadata=metadata,
+            )
+>>>>>>> 6bd26d8 (fix library downloads)
 
             logger.info(f"Added torrent download: {name} (ID: {task_id})")
 
@@ -152,47 +227,51 @@ class TorrentDownloader:
             try:
                 await asyncio.sleep(2)  # Update every 2 seconds
 
-                for task_id, download_info in list(self.downloads.items()):
-                    handle = download_info["handle"]
-
-                    if not handle.is_valid():
+                for task_id, state in list(self.downloads.items()):
+                    if not state.handle.is_valid():
                         continue
 
-                    status = handle.status()
+                    status = state.handle.status()
 
-                    # Update download status
-                    download_info["status"] = self._get_status_string(status)
-                    download_info["progress"] = status.progress * 100
-                    download_info["download_rate"] = status.download_rate
-                    download_info["upload_rate"] = status.upload_rate
-                    download_info["num_seeds"] = status.num_seeds
-                    download_info["num_peers"] = status.num_peers
-                    download_info["total_done"] = status.total_done
-                    download_info["total_wanted"] = status.total_wanted
+                    # Update download state
+                    state.status = self._get_status_string(status)
+                    state.progress = status.progress * 100
+                    state.download_rate = status.download_rate
+                    state.upload_rate = status.upload_rate
+                    state.num_seeds = status.num_seeds
+                    state.num_peers = status.num_peers
+                    state.total_done = status.total_done
+                    state.total_wanted = status.total_wanted
 
                     # Calculate ETA
                     if status.download_rate > 0:
                         remaining = status.total_wanted - status.total_done
                         eta = remaining / status.download_rate
-                        download_info["eta"] = int(eta)
+                        state.eta = int(eta)
                     else:
-                        download_info["eta"] = None
+                        state.eta = None
 
                     # Check if completed
-                    if status.is_seeding or status.progress >= 1.0:
-                        # Only process once
-                        if "completed_at" not in download_info:
-                            logger.info(
-                                f"Download completed: {download_info['name']} (ID: {task_id})"
-                            )
-                            download_info["completed_at"] = datetime.now()
+                    if (status.is_seeding or status.progress >= 1.0) and state.completed_at is None:
+                        logger.info(f"Download completed: {state.name} (ID: {task_id})")
+                        state.completed_at = datetime.now()
 
-                            # Trigger callback if set
-                            if hasattr(self, "_on_download_complete"):
-                                try:
-                                    await self._on_download_complete(task_id, download_info)
-                                except Exception as e:
-                                    logger.error(f"Error in download complete callback: {e}")
+                        # Trigger callback if set
+                        if self._on_download_complete is not None:
+                            try:
+                                await self._on_download_complete(task_id, state)
+                            except Exception as e:
+                                logger.error(f"Error in download complete callback: {e}")
+
+                        # Remove torrent to avoid seeding and free resources
+                        try:
+                            self.session.remove_torrent(state.handle)
+                            del self.downloads[task_id]
+                            logger.info(
+                                f"Removed completed download from tracking: {state.name} (ID: {task_id})"
+                            )
+                        except Exception as e:
+                            logger.error(f"Error removing completed torrent: {e}")
 
             except asyncio.CancelledError:
                 break
@@ -234,25 +313,8 @@ class TorrentDownloader:
         if task_id not in self.downloads:
             return None
 
-        download_info = self.downloads[task_id]
-
-        return DownloadTask(
-            id=task_id,
-            torrent_name=download_info["name"],
-            magnet_link=download_info["magnet_link"],
-            status=download_info.get("status", "queued"),
-            progress=download_info.get("progress", 0.0),
-            download_speed=download_info.get("download_rate", 0.0),
-            upload_speed=download_info.get("upload_rate", 0.0),
-            seeders=download_info.get("num_seeds", 0),
-            peers=download_info.get("num_peers", 0),
-            downloaded_bytes=download_info.get("total_done", 0),
-            total_bytes=download_info.get("total_wanted", 0),
-            eta=download_info.get("eta"),
-            save_path=self.download_path,
-            created_at=download_info["created_at"],
-            completed_at=download_info.get("completed_at"),
-        )
+        state = self.downloads[task_id]
+        return state.to_download_task(self.download_path)
 
     async def get_all_tasks(self) -> list[DownloadTask]:
         """Get all download tasks.
@@ -261,7 +323,7 @@ class TorrentDownloader:
             List of download tasks
         """
         tasks = []
-        for task_id in self.downloads.keys():
+        for task_id in self.downloads:
             task = await self.get_task_status(task_id)
             if task:
                 tasks.append(task)
@@ -280,8 +342,8 @@ class TorrentDownloader:
             return False
 
         try:
-            handle = self.downloads[task_id]["handle"]
-            handle.pause()
+            state = self.downloads[task_id]
+            state.handle.pause()
             logger.info(f"Paused download: {task_id}")
             return True
         except Exception as e:
@@ -301,8 +363,8 @@ class TorrentDownloader:
             return False
 
         try:
-            handle = self.downloads[task_id]["handle"]
-            handle.resume()
+            state = self.downloads[task_id]
+            state.handle.resume()
             logger.info(f"Resumed download: {task_id}")
             return True
         except Exception as e:
@@ -323,13 +385,13 @@ class TorrentDownloader:
             return False
 
         try:
-            handle = self.downloads[task_id]["handle"]
+            state = self.downloads[task_id]
 
             # Remove from session
             if delete_files:
-                self.session.remove_torrent(handle, lt.session.delete_files)
+                self.session.remove_torrent(state.handle, lt.session.delete_files)
             else:
-                self.session.remove_torrent(handle)
+                self.session.remove_torrent(state.handle)
 
             # Remove from tracking
             del self.downloads[task_id]
@@ -354,8 +416,8 @@ class TorrentDownloader:
             return None
 
         try:
-            handle = self.downloads[task_id]["handle"]
-            torrent_info = handle.torrent_file()
+            state = self.downloads[task_id]
+            torrent_info = state.handle.torrent_file()
 
             if torrent_info:
                 # Get the name of the torrent
@@ -372,11 +434,10 @@ class TorrentDownloader:
         self.stop_monitoring()
 
         # Save resume data for all torrents
-        for download_info in self.downloads.values():
+        for state in self.downloads.values():
             try:
-                handle = download_info["handle"]
-                if handle.is_valid():
-                    handle.save_resume_data()
+                if state.handle.is_valid():
+                    state.handle.save_resume_data()
             except Exception as e:
                 logger.error(f"Error saving resume data: {e}")
 

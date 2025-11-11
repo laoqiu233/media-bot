@@ -56,14 +56,11 @@ class Session:
             has_photo = photo_url is not None
 
             # Determine if we need to send a new message
-            needs_new_message = (
-                force_new_message
-                or (
-                    self.message_id is not None
-                    and (
-                        (has_photo != self.is_photo_message)
-                        or (has_photo and photo_url != self.last_poster_url)
-                    )
+            needs_new_message = force_new_message or (
+                self.message_id is not None
+                and (
+                    (has_photo != self.is_photo_message)
+                    or (has_photo and photo_url != self.last_poster_url)
                 )
             )
 
@@ -98,7 +95,8 @@ class Session:
                         )
                         self.is_photo_message = True
                     except Exception as e:
-                        logger.warning(f"Failed to send photo, falling back to text: {e}")
+                        logger.error(f"Failed to send photo: {e}")
+                        logger.info("Falling back to text message (poster will be skipped)")
                         message = await self.bot.send_message(
                             self.chat_id,
                             render_result_text,
@@ -106,6 +104,8 @@ class Session:
                             parse_mode="Markdown",
                         )
                         self.is_photo_message = False
+                        # Clear the cached poster URL to prevent retry loops
+                        self.last_poster_url = None
                 else:
                     message = await self.bot.send_message(
                         self.chat_id,

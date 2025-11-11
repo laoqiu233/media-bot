@@ -229,6 +229,14 @@ class LibraryManager:
                 # If move fails, reference the original location
                 new_file_path = file_path
 
+        # Extract quality from kwargs if provided, otherwise detect it
+        quality = kwargs.pop("quality", None)
+        if quality is None:
+            quality = self._detect_quality(title)
+
+        # Get file size from the new location
+        file_size = new_file_path.stat().st_size if new_file_path.exists() else None
+
         movie = Movie(
             id=movie_id,
             title=title,
@@ -237,8 +245,8 @@ class LibraryManager:
             description=description,
             media_type=MediaType.MOVIE,
             file_path=new_file_path,
-            file_size=file_path.stat().st_size if file_path.exists() else None,
-            quality=self._detect_quality(title),
+            file_size=file_size,
+            quality=quality,
             **kwargs,
         )
 
@@ -389,8 +397,7 @@ class LibraryManager:
         # Convert Path to string for JSON serialization
         if data.get("file_path"):
             data["file_path"] = str(data["file_path"])
-        if data.get("poster_path"):
-            data["poster_path"] = str(data["poster_path"])
+        # poster_url is already a string, no conversion needed
 
         async with aiofiles.open(metadata_file, "w", encoding="utf-8") as f:
             await f.write(json.dumps(data, indent=2, ensure_ascii=False))
@@ -402,9 +409,7 @@ class LibraryManager:
         metadata_file = series_folder / "series_metadata.json"
 
         data = series.model_dump(mode="json")
-        # Convert Path to string
-        if data.get("poster_path"):
-            data["poster_path"] = str(data["poster_path"])
+        # poster_url is already a string, no conversion needed
 
         # Don't save episodes in series metadata (too large)
         data["episodes"] = []
@@ -480,6 +485,7 @@ class LibraryManager:
             return VideoQuality.SD
         return VideoQuality.UNKNOWN
 
+
     async def delete_movie(self, movie_id: str) -> bool:
         """Delete a movie from the library.
 
@@ -497,7 +503,9 @@ class LibraryManager:
 
             # Delete the movie file
             if movie.file_path:
-                file_path = Path(movie.file_path) if isinstance(movie.file_path, str) else movie.file_path
+                file_path = (
+                    Path(movie.file_path) if isinstance(movie.file_path, str) else movie.file_path
+                )
                 if file_path.exists():
                     file_path.unlink()
                     logger.info(f"Deleted movie file: {file_path}")
@@ -509,12 +517,7 @@ class LibraryManager:
                     metadata_file.unlink()
                     logger.info(f"Deleted metadata file: {metadata_file}")
 
-                # Delete poster if exists
-                if movie.poster_path:
-                    poster_path = Path(movie.poster_path) if isinstance(movie.poster_path, str) else movie.poster_path
-                    if poster_path.exists():
-                        poster_path.unlink()
-                        logger.info(f"Deleted poster: {poster_path}")
+                # poster_url is a remote URL, no local file to delete
 
                 # Delete the movie folder if empty
                 if movie_folder.exists() and not any(movie_folder.iterdir()):
@@ -532,12 +535,15 @@ class LibraryManager:
             logger.error(f"Error deleting movie: {e}", exc_info=True)
             return False
 
-    async def import_from_download(self, download_path: Path, torrent_name: str) -> Movie | None:
+    async def import_from_download(
+        self, download_path: Path, torrent_name: str, metadata: dict | None = None
+    ) -> Movie | None:
         """Import a completed download into the library.
 
         Args:
             download_path: Path to the downloaded file/folder
             torrent_name: Name of the torrent
+            metadata: Optional metadata dict from IMDb (includes title, year, genres, etc.)
 
         Returns:
             Movie object if successfully imported, None otherwise
@@ -555,34 +561,110 @@ class LibraryManager:
                 logger.error(f"Download path does not exist: {download_path}")
                 return None
 
-            # Parse title and year from torrent name
-            # Common patterns: "Movie Title (2024) [720p]", "Movie.Title.2024.720p.BluRay"
-            title = torrent_name
-            year = None
+            # Use metadata if available, otherwise parse from torrent name
+            if metadata:
+                title = metadata.get("title", torrent_name)
+                year = metadata.get("year")
+                genres = metadata.get("genres", [])
+                description = metadata.get("description")
+                rating = metadata.get("rating")
+                director = metadata.get("director")
+                cast = metadata.get("cast", [])
+                poster_url = metadata.get("poster_url")
+                duration = metadata.get("duration")
+                imdb_id = metadata.get("imdb_id")
+                original_title = metadata.get("original_title")
+                quality_str = metadata.get("quality")  # VideoQuality enum value (e.g., "720p")
 
-            # Try to extract year
-            year_match = re.search(r"\((\d{4})\)|\b(\d{4})\b", torrent_name)
-            if year_match:
-                year = int(year_match.group(1) or year_match.group(2))
-                # Remove year and quality tags from title
-                title = re.sub(r"\(\d{4}\)", "", title)
-                title = re.sub(r"\b\d{4}\b", "", title)
+                logger.info(
+                    f"Importing movie with IMDb metadata: '{title}' ({year}) from {video_file.name}"
+                )
+            else:
+                # Parse title and year from torrent name
+                # Common patterns: "Movie Title (2024) [720p]", "Movie.Title.2024.720p.BluRay"
+                title = torrent_name
+                year = None
+                genres = []
+                description = None
+                rating = None
+                director = None
+                cast = []
+                poster_url = None
+                duration = None
+                imdb_id = None
+                original_title = None
+                quality_str = None
 
-            # Remove quality and release info
-            title = re.sub(r"\[.*?\]", "", title)  # Remove [720p], [YTS.AG], etc.
-            title = re.sub(
-                r"\.(720p|1080p|2160p|BluRay|WEB-DL|HDTV).*", "", title, flags=re.IGNORECASE
-            )
-            title = title.replace(".", " ").replace("_", " ")
-            title = re.sub(r"\s+", " ", title).strip()
+                # Try to extract year
+                year_match = re.search(r"\((\d{4})\)|\b(\d{4})\b", torrent_name)
+                if year_match:
+                    year = int(year_match.group(1) or year_match.group(2))
+                    # Remove year and quality tags from title
+                    title = re.sub(r"\(\d{4}\)", "", title)
+                    title = re.sub(r"\b\d{4}\b", "", title)
 
-            logger.info(f"Importing movie: '{title}' ({year}) from {video_file.name}")
+                # Remove quality and release info
+                title = re.sub(r"\[.*?\]", "", title)  # Remove [720p], [YTS.AG], etc.
+                title = re.sub(
+                    r"\.(720p|1080p|2160p|BluRay|WEB-DL|HDTV).*", "", title, flags=re.IGNORECASE
+                )
+                title = title.replace(".", " ").replace("_", " ")
+                title = re.sub(r"\s+", " ", title).strip()
 
-            # Add to library
+                logger.info(
+                    f"Importing movie without metadata: '{title}' ({year}) from {video_file.name}"
+                )
+
+            # Convert string genres to Genre enums if needed
+            parsed_genres = []
+            if genres:
+                for genre_str in genres:
+                    try:
+                        # Try to match with Genre enum
+                        genre_upper = genre_str.upper().replace("-", "")
+                        if genre_upper in Genre.__members__:
+                            parsed_genres.append(Genre[genre_upper])
+                        elif genre_str.lower() in [g.value for g in Genre]:
+                            parsed_genres.append(Genre(genre_str.lower()))
+                        else:
+                            # Use OTHER for unmapped genres
+                            parsed_genres.append(Genre.OTHER)
+                    except (KeyError, ValueError):
+                        logger.warning(f"Unknown genre: {genre_str}, using OTHER")
+                        parsed_genres.append(Genre.OTHER)
+
+            # Keep poster as URL - Telegram can fetch it directly
+            # No need to download it locally since we don't have a web server to serve it
+            poster_url_final = poster_url if poster_url else None
+
+            # Convert quality string to VideoQuality enum
+            quality = VideoQuality.UNKNOWN
+            if quality_str:
+                try:
+                    # quality_str is like "720p", "1080p", "4K", "SD", "unknown"
+                    quality = VideoQuality(quality_str)
+                except ValueError:
+                    logger.warning(f"Unknown quality value: {quality_str}, using UNKNOWN")
+                    quality = VideoQuality.UNKNOWN
+            else:
+                # Fallback: detect from torrent name or filename
+                quality = self._detect_quality(torrent_name)
+
+            # Add to library with all available metadata
             movie = await self.add_movie(
                 title=title,
                 file_path=video_file,
                 year=year,
+                genres=parsed_genres,
+                description=description,
+                rating=rating,
+                director=director,
+                cast=cast,
+                poster_url=poster_url_final,
+                duration=duration,
+                imdb_id=imdb_id,
+                original_title=original_title,
+                quality=quality,
             )
 
             logger.info(f"Successfully imported movie to library: {movie.title}")

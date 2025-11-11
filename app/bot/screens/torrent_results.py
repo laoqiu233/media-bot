@@ -34,9 +34,17 @@ class TorrentResultsScreen(Screen):
         Expects kwargs:
             movie: IMDbMovie object
             provider: Provider name (e.g., "yts")
+            movies: List of all movies (for back navigation chain)
+            detailed_movies: Dict of detailed movie data (for back navigation chain)
+            query: Search query (for back navigation chain)
+            movie_page: Current movie page (for back navigation chain)
         """
         movie: IMDbMovie = kwargs.get("movie")
         provider = kwargs.get("provider", "yts")
+        movies = kwargs.get("movies", [])
+        detailed_movies = kwargs.get("detailed_movies", {})
+        query = kwargs.get("query", "")
+        movie_page = kwargs.get("movie_page", 0)
 
         # Search for torrents using the movie title
         search_query = movie.primaryTitle
@@ -54,6 +62,10 @@ class TorrentResultsScreen(Screen):
                 results=results,
                 page=0,
                 error=None,
+                movies=movies,
+                detailed_movies=detailed_movies,
+                query=query,
+                movie_page=movie_page,
             )
         except Exception as e:
             logger.error(f"Error searching torrents: {e}")
@@ -64,11 +76,13 @@ class TorrentResultsScreen(Screen):
                 results=[],
                 page=0,
                 error=str(e),
+                movies=movies,
+                detailed_movies=detailed_movies,
+                query=query,
+                movie_page=movie_page,
             )
 
-    async def render(
-        self, context: Context
-    ) -> tuple[str, InlineKeyboardMarkup, RenderOptions]:
+    async def render(self, context: Context) -> tuple[str, InlineKeyboardMarkup, RenderOptions]:
         """Render the torrent results screen."""
         state = context.get_context()
         movie: IMDbMovie = state.get("movie")
@@ -146,9 +160,18 @@ class TorrentResultsScreen(Screen):
         context: Context,
     ) -> ScreenHandlerResult:
         """Handle callback queries."""
+        state = context.get_context()
+        
         if query.data == TORRENT_BACK:
-            movie: IMDbMovie = context.get_context().get("movie")
-            return Navigation(next_screen="torrent_providers", movie=movie)
+            # Pass the movie and context back to providers screen
+            return Navigation(
+                next_screen="torrent_providers",
+                movie=state.get("movie"),
+                movies=state.get("movies", []),
+                detailed_movies=state.get("detailed_movies", {}),
+                query=state.get("query", ""),
+                page=state.get("movie_page", 0),
+            )
 
         elif query.data == TORRENT_PREV:
             page = context.get_context().get("page", 0)
@@ -171,14 +194,35 @@ class TorrentResultsScreen(Screen):
         """Start downloading the selected torrent."""
         try:
             results = context.get_context().get("results", [])
+            movie: IMDbMovie = context.get_context().get("movie")
 
             if 0 <= index < len(results):
                 result = results[index]
 
                 await query.answer(f"Starting download: {result.title[:30]}...", show_alert=False)
 
-                # Add download
-                await self.downloader.add_download(result.magnet_link, result.title)
+                # Prepare movie metadata to store with the download
+                metadata = None
+                if movie:
+                    metadata = {
+                        "imdb_id": movie.id,
+                        "title": movie.primaryTitle,
+                        "original_title": movie.originalTitle,
+                        "year": movie.startYear,
+                        "genres": movie.genres,
+                        "description": movie.plot,
+                        "rating": movie.rating_value,
+                        "director": movie.director_names[0] if movie.director_names else None,
+                        "cast": [star.name for star in movie.stars] if movie.stars else [],
+                        "poster_url": movie.poster_url,
+                        "duration": movie.runtimeSeconds,
+                        "quality": result.quality,  # Quality from torrent (720p, 1080p, etc.)
+                    }
+
+                # Add download with metadata
+                await self.downloader.add_download(
+                    result.magnet_link, result.title, metadata=metadata
+                )
 
                 # Navigate to downloads screen
                 return Navigation(next_screen="downloads")
@@ -186,4 +230,3 @@ class TorrentResultsScreen(Screen):
         except Exception as e:
             logger.error(f"Error starting download: {e}")
             await query.answer("Failed to start download", show_alert=True)
-

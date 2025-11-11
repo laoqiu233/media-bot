@@ -66,7 +66,7 @@
 
 3. **Poster Display:**
    - Uses `RenderOptions(photo_url=...)` for poster images
-   - Currently checks for HTTP URLs in `poster_path` field
+   - Uses `poster_url` field containing HTTP URLs to poster images
    - Gracefully handles missing posters
 
 ### 3. Added Delete Method to Library Manager (`app/library/manager.py`)
@@ -137,10 +137,10 @@
 ## Known Limitations
 
 1. **Poster Display:**
-   - Currently only works if poster_path contains an HTTP URL
-   - Local poster files are not served (would require a web server)
-   - Movies imported from downloads don't have IMDb metadata yet
-   - Future enhancement: Integrate IMDb metadata during import
+   - Only works with HTTP URLs stored in `poster_url` field
+   - Local poster files are not supported (would require a web server)
+   - Posters are fetched directly from IMDb by Telegram
+   - All downloaded movies now include IMDb metadata with poster URLs
 
 2. **Series Support:**
    - Series functionality completely removed

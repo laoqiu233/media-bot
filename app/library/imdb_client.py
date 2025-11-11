@@ -93,4 +93,3 @@ class IMDbClient:
         except Exception as e:
             logger.error(f"Error fetching IMDb title: {e}")
             return None
-
