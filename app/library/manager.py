@@ -4,9 +4,7 @@ import asyncio
 import json
 import logging
 import re
-from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
 from uuid import uuid4
 
 import aiofiles
@@ -41,8 +39,8 @@ class LibraryManager:
         self.series_path.mkdir(parents=True, exist_ok=True)
 
         # In-memory cache
-        self._movies_cache: Dict[str, Movie] = {}
-        self._series_cache: Dict[str, Series] = {}
+        self._movies_cache: dict[str, Movie] = {}
+        self._series_cache: dict[str, Series] = {}
         self._cache_loaded = False
 
     async def scan_library(self) -> tuple[int, int]:
@@ -73,7 +71,7 @@ class LibraryManager:
                 continue
 
             try:
-                async with aiofiles.open(metadata_file, "r", encoding="utf-8") as f:
+                async with aiofiles.open(metadata_file, encoding="utf-8") as f:
                     content = await f.read()
                     data = json.loads(content)
 
@@ -105,7 +103,7 @@ class LibraryManager:
                 continue
 
             try:
-                async with aiofiles.open(metadata_file, "r", encoding="utf-8") as f:
+                async with aiofiles.open(metadata_file, encoding="utf-8") as f:
                     content = await f.read()
                     data = json.loads(content)
                     series = Series(**data)
@@ -118,7 +116,7 @@ class LibraryManager:
             except Exception as e:
                 print(f"Error loading series metadata from {metadata_file}: {e}")
 
-    async def _scan_episodes(self, series_dir: Path, series_id: str) -> List[Episode]:
+    async def _scan_episodes(self, series_dir: Path, series_id: str) -> list[Episode]:
         """Scan series directory for episodes.
 
         Args:
@@ -146,9 +144,7 @@ class LibraryManager:
                     continue
 
                 # Try to parse episode number from filename
-                episode_match = re.search(
-                    r"[SE](\d+)[E](\d+)", episode_file.stem, re.IGNORECASE
-                )
+                episode_match = re.search(r"[SE](\d+)[E](\d+)", episode_file.stem, re.IGNORECASE)
                 if episode_match:
                     episode_num = int(episode_match.group(2))
                 else:
@@ -163,9 +159,7 @@ class LibraryManager:
                 metadata_file = episode_file.with_suffix(".json")
                 if metadata_file.exists():
                     try:
-                        async with aiofiles.open(
-                            metadata_file, "r", encoding="utf-8"
-                        ) as f:
+                        async with aiofiles.open(metadata_file, encoding="utf-8") as f:
                             content = await f.read()
                             data = json.loads(content)
                             data["file_path"] = str(episode_file)
@@ -195,9 +189,9 @@ class LibraryManager:
         self,
         title: str,
         file_path: Path,
-        year: Optional[int] = None,
-        genres: Optional[List[Genre]] = None,
-        description: Optional[str] = None,
+        year: int | None = None,
+        genres: list[Genre] | None = None,
+        description: str | None = None,
         **kwargs,
     ) -> Movie:
         """Add a movie to the library.
@@ -221,11 +215,12 @@ class LibraryManager:
         new_file_path = movie_folder / file_path.name
         if file_path != new_file_path and file_path.exists():
             import shutil
+
             try:
                 # Move the file to the library
                 shutil.move(str(file_path), str(new_file_path))
                 logger.info(f"Moved {file_path.name} to library at {new_file_path}")
-                
+
                 # Clean up empty parent directory if it exists
                 if file_path.parent.exists() and not any(file_path.parent.iterdir()):
                     file_path.parent.rmdir()
@@ -255,9 +250,9 @@ class LibraryManager:
     async def add_series(
         self,
         title: str,
-        year: Optional[int] = None,
-        genres: Optional[List[Genre]] = None,
-        description: Optional[str] = None,
+        year: int | None = None,
+        genres: list[Genre] | None = None,
+        description: str | None = None,
         **kwargs,
     ) -> Series:
         """Add a series to the library.
@@ -294,9 +289,9 @@ class LibraryManager:
     async def search(
         self,
         query: str,
-        media_type: Optional[MediaType] = None,
-        genre: Optional[Genre] = None,
-    ) -> List[Movie | Series]:
+        media_type: MediaType | None = None,
+        genre: Genre | None = None,
+    ) -> list[Movie | Series]:
         """Search for media in the library.
 
         Args:
@@ -316,20 +311,20 @@ class LibraryManager:
         # Search movies
         if media_type is None or media_type == MediaType.MOVIE:
             for movie in self._movies_cache.values():
-                if query_lower in movie.title.lower():
-                    if genre is None or genre in movie.genres:
-                        results.append(movie)
+                if query_lower in movie.title.lower() and (genre is None or genre in movie.genres):
+                    results.append(movie)
 
         # Search series
         if media_type is None or media_type == MediaType.SERIES:
             for series in self._series_cache.values():
-                if query_lower in series.title.lower():
-                    if genre is None or genre in series.genres:
-                        results.append(series)
+                if query_lower in series.title.lower() and (
+                    genre is None or genre in series.genres
+                ):
+                    results.append(series)
 
         return results
 
-    async def get_movie(self, movie_id: str) -> Optional[Movie]:
+    async def get_movie(self, movie_id: str) -> Movie | None:
         """Get a movie by ID.
 
         Args:
@@ -342,7 +337,7 @@ class LibraryManager:
             await self.scan_library()
         return self._movies_cache.get(movie_id)
 
-    async def get_series(self, series_id: str) -> Optional[Series]:
+    async def get_series(self, series_id: str) -> Series | None:
         """Get a series by ID.
 
         Args:
@@ -355,19 +350,19 @@ class LibraryManager:
             await self.scan_library()
         return self._series_cache.get(series_id)
 
-    async def get_all_movies(self) -> List[Movie]:
+    async def get_all_movies(self) -> list[Movie]:
         """Get all movies in the library."""
         if not self._cache_loaded:
             await self.scan_library()
         return list(self._movies_cache.values())
 
-    async def get_all_series(self) -> List[Series]:
+    async def get_all_series(self) -> list[Series]:
         """Get all series in the library."""
         if not self._cache_loaded:
             await self.scan_library()
         return list(self._series_cache.values())
 
-    async def get_recommendations(self, limit: int = 10) -> List[Movie | Series]:
+    async def get_recommendations(self, limit: int = 10) -> list[Movie | Series]:
         """Get media recommendations.
 
         Args:
@@ -380,9 +375,7 @@ class LibraryManager:
             await self.scan_library()
 
         # Simple recommendation: return recently added items
-        all_media = list(self._movies_cache.values()) + list(
-            self._series_cache.values()
-        )
+        all_media = list(self._movies_cache.values()) + list(self._series_cache.values())
         all_media.sort(key=lambda x: x.added_date, reverse=True)
         return all_media[:limit]
 
@@ -419,7 +412,7 @@ class LibraryManager:
         async with aiofiles.open(metadata_file, "w", encoding="utf-8") as f:
             await f.write(json.dumps(data, indent=2, ensure_ascii=False))
 
-    async def _create_movie_from_folder(self, movie_dir: Path) -> Optional[Movie]:
+    async def _create_movie_from_folder(self, movie_dir: Path) -> Movie | None:
         """Create movie metadata from folder name and contents."""
         video_file = self._find_video_file(movie_dir)
         if not video_file:
@@ -443,15 +436,13 @@ class LibraryManager:
             quality=self._detect_quality(video_file.stem),
         )
 
-    async def _create_series_from_folder(self, series_dir: Path) -> Optional[Series]:
+    async def _create_series_from_folder(self, series_dir: Path) -> Series | None:
         """Create series metadata from folder name."""
         title = series_dir.name
 
         # Count seasons
         seasons = [
-            d
-            for d in series_dir.iterdir()
-            if d.is_dir() and d.name.lower().startswith("season")
+            d for d in series_dir.iterdir() if d.is_dir() and d.name.lower().startswith("season")
         ]
 
         series_id = str(uuid4())
@@ -468,7 +459,7 @@ class LibraryManager:
 
         return series
 
-    def _find_video_file(self, directory: Path) -> Optional[Path]:
+    def _find_video_file(self, directory: Path) -> Path | None:
         """Find the first video file in a directory."""
         video_extensions = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv"}
         for file in directory.iterdir():
@@ -488,14 +479,14 @@ class LibraryManager:
         elif "480p" in filename_lower or "sd" in filename_lower:
             return VideoQuality.SD
         return VideoQuality.UNKNOWN
-    
-    async def import_from_download(self, download_path: Path, torrent_name: str) -> Optional[Movie]:
+
+    async def import_from_download(self, download_path: Path, torrent_name: str) -> Movie | None:
         """Import a completed download into the library.
-        
+
         Args:
             download_path: Path to the downloaded file/folder
             torrent_name: Name of the torrent
-            
+
         Returns:
             Movie object if successfully imported, None otherwise
         """
@@ -511,39 +502,40 @@ class LibraryManager:
             else:
                 logger.error(f"Download path does not exist: {download_path}")
                 return None
-            
+
             # Parse title and year from torrent name
             # Common patterns: "Movie Title (2024) [720p]", "Movie.Title.2024.720p.BluRay"
             title = torrent_name
             year = None
-            
+
             # Try to extract year
-            year_match = re.search(r'\((\d{4})\)|\b(\d{4})\b', torrent_name)
+            year_match = re.search(r"\((\d{4})\)|\b(\d{4})\b", torrent_name)
             if year_match:
                 year = int(year_match.group(1) or year_match.group(2))
                 # Remove year and quality tags from title
-                title = re.sub(r'\(\d{4}\)', '', title)
-                title = re.sub(r'\b\d{4}\b', '', title)
-            
+                title = re.sub(r"\(\d{4}\)", "", title)
+                title = re.sub(r"\b\d{4}\b", "", title)
+
             # Remove quality and release info
-            title = re.sub(r'\[.*?\]', '', title)  # Remove [720p], [YTS.AG], etc.
-            title = re.sub(r'\.(720p|1080p|2160p|BluRay|WEB-DL|HDTV).*', '', title, flags=re.IGNORECASE)
-            title = title.replace('.', ' ').replace('_', ' ')
-            title = re.sub(r'\s+', ' ', title).strip()
-            
+            title = re.sub(r"\[.*?\]", "", title)  # Remove [720p], [YTS.AG], etc.
+            title = re.sub(
+                r"\.(720p|1080p|2160p|BluRay|WEB-DL|HDTV).*", "", title, flags=re.IGNORECASE
+            )
+            title = title.replace(".", " ").replace("_", " ")
+            title = re.sub(r"\s+", " ", title).strip()
+
             logger.info(f"Importing movie: '{title}' ({year}) from {video_file.name}")
-            
+
             # Add to library
             movie = await self.add_movie(
                 title=title,
                 file_path=video_file,
                 year=year,
             )
-            
+
             logger.info(f"Successfully imported movie to library: {movie.title}")
             return movie
-            
+
         except Exception as e:
             logger.error(f"Error importing download to library: {e}", exc_info=True)
             return None
-

@@ -2,8 +2,9 @@
 
 import asyncio
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 try:
     import mpv
@@ -28,8 +29,8 @@ class MPVController:
     def __init__(self):
         """Initialize MPV controller."""
         if not hasattr(self, "_initialized"):
-            self._player: Optional[Any] = None
-            self._current_file: Optional[Path] = None
+            self._player: Any | None = None
+            self._current_file: Path | None = None
             self._is_playing = False
             self._event_handlers: dict[str, list[Callable]] = {}
             self._initialized = True
@@ -117,7 +118,7 @@ class MPVController:
         # Convert to Path if string
         if isinstance(file_path, str):
             file_path = Path(file_path)
-        
+
         if not file_path.exists():
             logger.error(f"File not found: {file_path}")
             return False
@@ -126,30 +127,34 @@ class MPVController:
             async with self._lock:
                 logger.info(f"Starting playback of: {file_path}")
                 logger.info(f"File size: {file_path.stat().st_size / (1024*1024):.2f} MB")
-                
+
                 # Load and play the file
                 self._player.loadfile(str(file_path))
                 self._current_file = file_path
-                
+
                 # Ensure playback starts (unpause if paused)
                 self._player.pause = False
                 self._is_playing = True
-                
+
                 # Give MPV a moment to start
                 await asyncio.sleep(0.5)
-                
+
                 # Verify playback actually started
                 try:
                     if self._player.time_pos is not None or self._player.duration is not None:
                         logger.info(f"✅ Playback started successfully: {file_path.name}")
                         logger.info(f"   Duration: {self._player.duration}s")
                     else:
-                        logger.warning(f"⚠️  File loaded but playback status unknown")
-                        logger.warning("   This is normal on systems without video output (e.g., macOS)")
-                        logger.warning("   On Raspberry Pi with HDMI, playback should work correctly")
+                        logger.warning("⚠️  File loaded but playback status unknown")
+                        logger.warning(
+                            "   This is normal on systems without video output (e.g., macOS)"
+                        )
+                        logger.warning(
+                            "   On Raspberry Pi with HDMI, playback should work correctly"
+                        )
                 except Exception as e:
                     logger.debug(f"Could not read playback status: {e}")
-                
+
                 return True
         except AttributeError as e:
             logger.error(f"MPV player method not available: {e}")
@@ -366,7 +371,7 @@ class MPVController:
             logger.error(f"Error cycling audio: {e}")
             return False
 
-    async def get_position(self) -> Optional[float]:
+    async def get_position(self) -> float | None:
         """Get current playback position in seconds.
 
         Returns:
@@ -380,7 +385,7 @@ class MPVController:
         except Exception:
             return None
 
-    async def get_duration(self) -> Optional[float]:
+    async def get_duration(self) -> float | None:
         """Get total duration in seconds.
 
         Returns:
@@ -394,7 +399,7 @@ class MPVController:
         except Exception:
             return None
 
-    async def get_volume(self) -> Optional[int]:
+    async def get_volume(self) -> int | None:
         """Get current volume level.
 
         Returns:
@@ -416,7 +421,7 @@ class MPVController:
         """
         return self._is_playing
 
-    def get_current_file(self) -> Optional[Path]:
+    def get_current_file(self) -> Path | None:
         """Get currently playing file.
 
         Returns:
@@ -466,4 +471,3 @@ class MPVController:
 
 # Global player instance
 player = MPVController()
-

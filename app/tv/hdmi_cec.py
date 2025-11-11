@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import re
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,7 @@ class CECController:
         """
         self.cec_device = cec_device
         self.enabled = enabled
-        self._cec_available: Optional[bool] = None
+        self._cec_available: bool | None = None
 
     async def check_availability(self) -> bool:
         """Check if CEC is available on the system.
@@ -58,9 +57,7 @@ class CECController:
             self._cec_available = False
             return False
 
-    async def _send_cec_command(
-        self, command: str, timeout: float = 5.0
-    ) -> tuple[bool, str]:
+    async def _send_cec_command(self, command: str, timeout: float = 5.0) -> tuple[bool, str]:
         """Send a CEC command using cec-client.
 
         Args:
@@ -85,10 +82,8 @@ class CECController:
             )
 
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(), timeout=timeout
-                )
-            except asyncio.TimeoutError:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            except TimeoutError:
                 process.kill()
                 return False, "Command timeout"
 
@@ -136,7 +131,7 @@ class CECController:
         success, output = await self._send_cec_command("as")
         return success
 
-    async def get_power_status(self) -> Optional[str]:
+    async def get_power_status(self) -> str | None:
         """Get the power status of the TV.
 
         Returns:
@@ -212,7 +207,7 @@ class CECController:
         success, _ = await self._send_cec_command("mute")
         return success
 
-    async def get_osd_name(self) -> Optional[str]:
+    async def get_osd_name(self) -> str | None:
         """Get the OSD name of the TV.
 
         Returns:
@@ -244,9 +239,7 @@ class CECController:
         devices = []
         # Parse scan output
         # Format: "device #0: TV"
-        for match in re.finditer(
-            r"device #(\d+):\s*(.+)", output, re.IGNORECASE | re.MULTILINE
-        ):
+        for match in re.finditer(r"device #(\d+):\s*(.+)", output, re.IGNORECASE | re.MULTILINE):
             device_num = int(match.group(1))
             device_name = match.group(2).strip()
             devices.append({"address": device_num, "name": device_name})
@@ -294,12 +287,10 @@ class CECController:
 
 
 # Global CEC controller instance
-cec_controller: Optional[CECController] = None
+cec_controller: CECController | None = None
 
 
-def get_cec_controller(
-    cec_device: str = "/dev/cec0", enabled: bool = True
-) -> CECController:
+def get_cec_controller(cec_device: str = "/dev/cec0", enabled: bool = True) -> CECController:
     """Get or create the global CEC controller instance.
 
     Args:
@@ -313,4 +304,3 @@ def get_cec_controller(
     if cec_controller is None:
         cec_controller = CECController(cec_device=cec_device, enabled=enabled)
     return cec_controller
-

@@ -2,7 +2,6 @@
 
 import os
 from pathlib import Path
-from typing import Optional
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
@@ -32,8 +31,8 @@ class MediaLibraryConfig(BaseModel):
         default=Path.home() / "downloads",
         description="Path for downloading torrents",
     )
-    movies_path: Optional[Path] = None
-    series_path: Optional[Path] = None
+    movies_path: Path | None = None
+    series_path: Path | None = None
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -95,9 +94,7 @@ def load_config() -> Config:
 
     # Load authorized users from comma-separated env var
     authorized_users_str = os.getenv("AUTHORIZED_USERS", "")
-    authorized_users = [
-        user.strip() for user in authorized_users_str.split(",") if user.strip()
-    ]
+    authorized_users = [user.strip() for user in authorized_users_str.split(",") if user.strip()]
 
     media_library_path = os.getenv("MEDIA_LIBRARY_PATH")
     download_path = os.getenv("DOWNLOAD_PATH")
@@ -130,5 +127,4 @@ def load_config() -> Config:
 
 
 # Global config instance (to be initialized in main)
-config: Optional[Config] = None
-
+config: Config | None = None

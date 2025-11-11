@@ -2,7 +2,6 @@
 
 import logging
 from functools import wraps
-from typing import List, Optional
 
 from telegram import Update
 
@@ -12,16 +11,14 @@ logger = logging.getLogger(__name__)
 class AuthManager:
     """Manages user authorization based on Telegram usernames."""
 
-    def __init__(self, authorized_users: List[str]):
+    def __init__(self, authorized_users: list[str]):
         """Initialize auth manager.
 
         Args:
             authorized_users: List of authorized Telegram usernames (without @)
         """
         # Normalize usernames (lowercase, remove @ if present)
-        self.authorized_users = {
-            username.lower().lstrip("@") for username in authorized_users
-        }
+        self.authorized_users = {username.lower().lstrip("@") for username in authorized_users}
         logger.info(f"Authorization enabled for {len(self.authorized_users)} users")
 
     def is_authorized(self, update: Update) -> bool:
@@ -49,8 +46,7 @@ class AuthManager:
 
         if not is_auth:
             logger.warning(
-                f"Unauthorized access attempt by @{username} "
-                f"(ID: {update.effective_user.id})"
+                f"Unauthorized access attempt by @{username} " f"(ID: {update.effective_user.id})"
             )
 
         return is_auth
@@ -79,10 +75,10 @@ class AuthManager:
 
 
 # Global auth manager instance (initialized in integrated_bot.py)
-_auth_manager: Optional[AuthManager] = None
+_auth_manager: AuthManager | None = None
 
 
-def init_auth(authorized_users: List[str]) -> AuthManager:
+def init_auth(authorized_users: list[str]) -> AuthManager:
     """Initialize the global auth manager.
 
     Args:
@@ -96,7 +92,7 @@ def init_auth(authorized_users: List[str]) -> AuthManager:
     return _auth_manager
 
 
-def get_auth_manager() -> Optional[AuthManager]:
+def get_auth_manager() -> AuthManager | None:
     """Get the global auth manager instance.
 
     Returns:
@@ -119,4 +115,3 @@ def is_authorized(update: Update) -> bool:
         return True
 
     return _auth_manager.is_authorized(update)
-

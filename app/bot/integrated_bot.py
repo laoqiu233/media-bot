@@ -2,31 +2,20 @@
 
 import asyncio
 import logging
-import os
-from pathlib import Path
 
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
-from app.config import load_config
-from app.library.manager import LibraryManager
-from app.torrent.searcher import TorrentSearcher
-from app.torrent.downloader import get_downloader
-from app.player.mpv_controller import player
-from app.tv.hdmi_cec import get_cec_controller
-from app.scheduler.series_scheduler import get_scheduler
-
-# Import screen system
-from app.bot.screen_manager import ScreenManager
 from app.bot.auth import init_auth
 from app.bot.handlers import BotHandlers
-
-# Import screens
-from app.bot.screens.main_menu import MainMenuScreen
-from app.bot.screens.search import SearchScreen
-from app.bot.screens.library import LibraryScreen
-from app.bot.screens.downloads import DownloadsScreen
-from app.bot.screens.player import PlayerScreen
-from app.bot.screens.tv import TVScreen
+from app.bot.screen_registry import ScreenRegistry
+from app.bot.session_manager import SessionManager
+from app.config import load_config
+from app.library.manager import LibraryManager
+from app.player.mpv_controller import player
+from app.scheduler.series_scheduler import get_scheduler
+from app.torrent.downloader import get_downloader
+from app.torrent.searcher import TorrentSearcher
+from app.tv.hdmi_cec import get_cec_controller
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +35,7 @@ async def initialize_components():
     auth_manager = None
     if config.telegram.authorized_users:
         auth_manager = init_auth(config.telegram.authorized_users)
-        logger.info(
-            f"Authorization enabled for {len(config.telegram.authorized_users)} users"
-        )
+        logger.info(f"Authorization enabled for {len(config.telegram.authorized_users)} users")
     else:
         logger.warning("No authorized users configured - bot is open to everyone!")
 
@@ -103,46 +90,16 @@ async def initialize_components():
     await series_scheduler.load_progress()
     logger.info("Series scheduler initialized")
 
-    # Initialize screen manager
-    screen_manager = ScreenManager()
-
-    # Create and register screens
-    main_menu = MainMenuScreen(screen_manager)
-    search_screen = SearchScreen(screen_manager, torrent_searcher, torrent_downloader)
-    library_screen = LibraryScreen(screen_manager, library_manager, mpv_controller)
-    downloads_screen = DownloadsScreen(screen_manager, torrent_downloader)
-    player_screen = PlayerScreen(screen_manager, mpv_controller)
-    tv_screen = TVScreen(screen_manager, cec_controller)
-
-    screen_manager.register_screen(main_menu)
-    screen_manager.register_screen(search_screen)
-    screen_manager.register_screen(library_screen)
-    screen_manager.register_screen(downloads_screen)
-    screen_manager.register_screen(player_screen)
-    screen_manager.register_screen(tv_screen)
-
-    # Store component references in screen manager for status screen
-    class ComponentHolder:
-        """Simple holder for system components."""
-        def __init__(self):
-            self.player = mpv_controller
-            self.cec = cec_controller
-            self.downloader = torrent_downloader
-            self.library = library_manager
-
-    screen_manager.handlers = ComponentHolder()
+    screen_registry = ScreenRegistry(
+        library_manager, mpv_controller, cec_controller, torrent_searcher, torrent_downloader
+    )
 
     logger.info("Screen system initialized")
 
-    # Create bot handlers
-    bot_handlers = BotHandlers(
-        screen_manager=screen_manager,
-        auth_manager=auth_manager,
-    )
-
     return (
         config,
-        bot_handlers,
+        auth_manager,
+        screen_registry,
         torrent_downloader,
         mpv_controller,
         series_scheduler,
@@ -166,38 +123,44 @@ def run_integrated_bot():
 
         try:
             # Initialize components
-            config, handlers, downloader, player_controller, scheduler = (
-                await initialize_components()
-            )
+            (
+                config,
+                auth_manager,
+                screen_registry,
+                downloader,
+                player_controller,
+                scheduler,
+            ) = await initialize_components()
 
             # Create Telegram application
             application = Application.builder().token(config.telegram.bot_token).build()
 
+            # Initialize the application to get the bot instance
+            await application.initialize()
+
+            # Create session manager and handlers with the bot instance
+            session_manager = SessionManager(application.bot, screen_registry)
+            handlers = BotHandlers(
+                session_manager=session_manager,
+                auth_manager=auth_manager,
+            )
+
             # Register handlers
             # Handle /start separately (don't delete it to avoid Telegram resending)
-            application.add_handler(
-                CommandHandler("start", handlers.handle_start_command)
-            )
-            
+            application.add_handler(CommandHandler("start", handlers.handle_start_command))
+
             # Handle all other text messages including commands
             application.add_handler(
                 MessageHandler(
                     filters.TEXT,  # Accept all text including commands
-                    handlers.handle_text_message
+                    handlers.handle_text_message,
                 )
             )
 
             # Handle all callback queries (button clicks)
-            application.add_handler(
-                CallbackQueryHandler(handlers.handle_callback)
-            )
+            application.add_handler(CallbackQueryHandler(handlers.handle_callback))
 
-            logger.info("🚀 Media Bot is starting...")
-            logger.info("📱 Screen-based UI enabled")
-            logger.info("Press Ctrl+C to stop")
-
-            # Initialize and start the bot
-            await application.initialize()
+            # Start the bot (already initialized above)
             await application.start()
             await application.updater.start_polling()
 

@@ -1,2 +1,1 @@
 """Series scheduler module."""
-

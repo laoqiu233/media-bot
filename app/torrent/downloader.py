@@ -4,7 +4,6 @@ import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
 from uuid import uuid4
 
 try:
@@ -59,18 +58,18 @@ class TorrentDownloader:
             logger.warning("DHT router configuration not available in this libtorrent version")
 
         # Storage for active downloads
-        self.downloads: Dict[str, Dict] = {}
-        self._monitor_task: Optional[asyncio.Task] = None
+        self.downloads: dict[str, dict] = {}
+        self._monitor_task: asyncio.Task | None = None
         self._on_download_complete = None  # Callback for completed downloads
 
     def set_completion_callback(self, callback):
         """Set callback to be called when a download completes.
-        
+
         Args:
             callback: Async function(task_id, download_info)
         """
         self._on_download_complete = callback
-    
+
     def start_monitoring(self):
         """Start monitoring downloads."""
         if self._monitor_task is None or self._monitor_task.done():
@@ -164,9 +163,9 @@ class TorrentDownloader:
                                 f"Download completed: {download_info['name']} (ID: {task_id})"
                             )
                             download_info["completed_at"] = datetime.now()
-                            
+
                             # Trigger callback if set
-                            if hasattr(self, '_on_download_complete'):
+                            if hasattr(self, "_on_download_complete"):
                                 try:
                                     await self._on_download_complete(task_id, download_info)
                                 except Exception as e:
@@ -200,7 +199,7 @@ class TorrentDownloader:
         else:
             return "queued"
 
-    async def get_task_status(self, task_id: str) -> Optional[DownloadTask]:
+    async def get_task_status(self, task_id: str) -> DownloadTask | None:
         """Get status of a download task.
 
         Args:
@@ -232,7 +231,7 @@ class TorrentDownloader:
             completed_at=download_info.get("completed_at"),
         )
 
-    async def get_all_tasks(self) -> List[DownloadTask]:
+    async def get_all_tasks(self) -> list[DownloadTask]:
         """Get all download tasks.
 
         Returns:
@@ -319,7 +318,7 @@ class TorrentDownloader:
             logger.error(f"Error removing download: {e}")
             return False
 
-    def get_download_path(self, task_id: str) -> Optional[Path]:
+    def get_download_path(self, task_id: str) -> Path | None:
         """Get the download path for a completed task.
 
         Args:
@@ -368,7 +367,7 @@ class TorrentDownloader:
 
 
 # Global downloader instance
-downloader: Optional[TorrentDownloader] = None
+downloader: TorrentDownloader | None = None
 
 
 def get_downloader(download_path: Path) -> TorrentDownloader:
@@ -384,4 +383,3 @@ def get_downloader(download_path: Path) -> TorrentDownloader:
     if downloader is None:
         downloader = TorrentDownloader(download_path)
     return downloader
-

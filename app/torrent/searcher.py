@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import re
-from typing import List
 from urllib.parse import quote
 
 import aiohttp
@@ -24,7 +23,7 @@ class TorrentSearcher:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
 
-    async def search(self, query: str, limit: int = 20) -> List[TorrentSearchResult]:
+    async def search(self, query: str, limit: int = 20) -> list[TorrentSearchResult]:
         """Search for torrents across multiple sources.
 
         Args:
@@ -59,7 +58,7 @@ class TorrentSearcher:
         results.sort(key=lambda x: x.seeders, reverse=True)
         return results[:limit]
 
-    async def _search_yts(self, query: str, limit: int) -> List[TorrentSearchResult]:
+    async def _search_yts(self, query: str, limit: int) -> list[TorrentSearchResult]:
         """Search YTS.mx using their API.
 
         Args:
@@ -74,69 +73,69 @@ class TorrentSearcher:
         url = f"https://yts.mx/api/v2/list_movies.json?query_term={encoded_query}&limit={limit}"
 
         try:
-            async with aiohttp.ClientSession(
-                timeout=self.timeout, headers=self.headers
-            ) as session:
-                async with session.get(url) as response:
-                    if response.status != 200:
-                        logger.warning(f"YTS returned status {response.status}")
-                        return results
+            async with (
+                aiohttp.ClientSession(timeout=self.timeout, headers=self.headers) as session,
+                session.get(url) as response,
+            ):
+                if response.status != 200:
+                    logger.warning(f"YTS returned status {response.status}")
+                    return results
 
-                    data = await response.json()
-                    
-                    # Check if we got valid data
-                    if data.get("status") != "ok":
-                        logger.warning(f"YTS API returned error status")
-                        return results
-                    
-                    movies = data.get("data", {}).get("movies", [])
-                    if not movies:
-                        logger.info("No results found on YTS")
-                        return results
+                data = await response.json()
 
-                    for movie in movies:
-                        try:
-                            title_base = movie.get("title", "Unknown")
-                            year = movie.get("year", "")
-                            
-                            # YTS provides multiple torrents per movie (different qualities)
-                            torrents = movie.get("torrents", [])
-                            
-                            for torrent in torrents:
-                                quality = torrent.get("quality", "Unknown")
-                                size = torrent.get("size", "Unknown")
-                                seeds = torrent.get("seeds", 0)
-                                peers = torrent.get("peers", 0)
-                                hash_code = torrent.get("hash", "")
-                                
-                                # Construct magnet link
-                                if not hash_code:
-                                    continue
-                                    
-                                title = f"{title_base} ({year}) [{quality}]"
-                                magnet = f"magnet:?xt=urn:btih:{hash_code}&dn={quote(title)}&tr=udp://open.demonii.com:1337/announce&tr=udp://tracker.openbittorrent.com:80&tr=udp://tracker.coppersurfer.tk:6969&tr=udp://glotorrents.pw:6969/announce&tr=udp://tracker.opentrackr.org:1337/announce&tr=udp://torrent.gresille.org:80/announce&tr=udp://p4p.arenabg.com:1337&tr=udp://tracker.leechers-paradise.org:6969"
-                                
-                                result = TorrentSearchResult(
-                                    title=title,
-                                    magnet_link=magnet,
-                                    size=size,
-                                    seeders=seeds,
-                                    leechers=peers,
-                                    source="YTS",
-                                    quality=self._map_yts_quality(quality),
-                                )
-                                results.append(result)
+                # Check if we got valid data
+                if data.get("status") != "ok":
+                    logger.warning("YTS API returned error status")
+                    return results
 
-                        except Exception as e:
-                            logger.debug(f"Error parsing YTS movie: {e}")
-                            continue
+                movies = data.get("data", {}).get("movies", [])
+                if not movies:
+                    logger.info("No results found on YTS")
+                    return results
+
+                for movie in movies:
+                    try:
+                        title_base = movie.get("title", "Unknown")
+                        year = movie.get("year", "")
+
+                        # YTS provides multiple torrents per movie (different qualities)
+                        torrents = movie.get("torrents", [])
+
+                        for torrent in torrents:
+                            quality = torrent.get("quality", "Unknown")
+                            size = torrent.get("size", "Unknown")
+                            seeds = torrent.get("seeds", 0)
+                            peers = torrent.get("peers", 0)
+                            hash_code = torrent.get("hash", "")
+
+                            # Construct magnet link
+                            if not hash_code:
+                                continue
+
+                            title = f"{title_base} ({year}) [{quality}]"
+                            magnet = f"magnet:?xt=urn:btih:{hash_code}&dn={quote(title)}&tr=udp://open.demonii.com:1337/announce&tr=udp://tracker.openbittorrent.com:80&tr=udp://tracker.coppersurfer.tk:6969&tr=udp://glotorrents.pw:6969/announce&tr=udp://tracker.opentrackr.org:1337/announce&tr=udp://torrent.gresille.org:80/announce&tr=udp://p4p.arenabg.com:1337&tr=udp://tracker.leechers-paradise.org:6969"
+
+                            result = TorrentSearchResult(
+                                title=title,
+                                magnet_link=magnet,
+                                size=size,
+                                seeders=seeds,
+                                leechers=peers,
+                                source="YTS",
+                                quality=self._map_yts_quality(quality),
+                            )
+                            results.append(result)
+
+                    except Exception as e:
+                        logger.debug(f"Error parsing YTS movie: {e}")
+                        continue
 
         except Exception as e:
             logger.error(f"Error searching YTS: {e}")
 
         logger.info(f"Found {len(results)} results from YTS")
         return results
-    
+
     def _map_yts_quality(self, yts_quality: str) -> VideoQuality:
         """Map YTS quality string to VideoQuality enum.
 
@@ -154,9 +153,7 @@ class TorrentSearcher:
         }
         return quality_map.get(yts_quality, VideoQuality.UNKNOWN)
 
-    async def _search_piratebay(
-        self, query: str, limit: int
-    ) -> List[TorrentSearchResult]:
+    async def _search_piratebay(self, query: str, limit: int) -> list[TorrentSearchResult]:
         """Search The Pirate Bay (using proxy/mirror).
 
         Args:
@@ -167,7 +164,7 @@ class TorrentSearcher:
             List of search results
         """
         results = []
-        
+
         # Note: TPB is frequently blocked/down. Using a common mirror.
         # In production, you'd want to try multiple mirrors/proxies
         mirrors = [
@@ -182,77 +179,75 @@ class TorrentSearcher:
             try:
                 url = f"{mirror}/search/{encoded_query}/1/99/0"
 
-                async with aiohttp.ClientSession(
-                    timeout=self.timeout, headers=self.headers
-                ) as session:
-                    async with session.get(url) as response:
-                        if response.status != 200:
-                            continue
+                async with (
+                    aiohttp.ClientSession(timeout=self.timeout, headers=self.headers) as session,
+                    session.get(url) as response,
+                ):
+                    if response.status != 200:
+                        continue
 
-                        html = await response.text()
-                        soup = BeautifulSoup(html, "lxml")
+                    html = await response.text()
+                    soup = BeautifulSoup(html, "lxml")
 
-                        # Find search results
-                        rows = soup.find_all("tr")
+                    # Find search results
+                    rows = soup.find_all("tr")
 
-                        for row in rows[:limit]:
-                            try:
-                                # Find torrent name
-                                name_cell = row.find("a", class_="detLink")
-                                if not name_cell:
-                                    continue
-
-                                title = name_cell.text.strip()
-
-                                # Find magnet link
-                                magnet_link_elem = row.find(
-                                    "a", href=re.compile(r"^magnet:\?")
-                                )
-                                if not magnet_link_elem:
-                                    continue
-
-                                magnet = magnet_link_elem["href"]
-
-                                # Find seeders/leechers
-                                font_cells = row.find_all("td", align="right")
-                                seeders = 0
-                                leechers = 0
-                                if len(font_cells) >= 2:
-                                    try:
-                                        seeders = int(font_cells[0].text.strip())
-                                        leechers = int(font_cells[1].text.strip())
-                                    except ValueError:
-                                        pass
-
-                                # Find size
-                                desc_cell = row.find("font", class_="detDesc")
-                                size = "Unknown"
-                                if desc_cell:
-                                    size_match = re.search(
-                                        r"Size\s+([\d.]+\s*[KMGT]iB)",
-                                        desc_cell.text,
-                                    )
-                                    if size_match:
-                                        size = size_match.group(1)
-
-                                result = TorrentSearchResult(
-                                    title=title,
-                                    magnet_link=magnet,
-                                    size=size,
-                                    seeders=seeders,
-                                    leechers=leechers,
-                                    source="ThePirateBay",
-                                    quality=self._detect_quality(title),
-                                )
-                                results.append(result)
-
-                            except Exception as e:
-                                logger.debug(f"Error parsing TPB row: {e}")
+                    for row in rows[:limit]:
+                        try:
+                            # Find torrent name
+                            name_cell = row.find("a", class_="detLink")
+                            if not name_cell:
                                 continue
 
-                        if results:
-                            logger.info(f"Found {len(results)} results from TPB")
-                            return results
+                            title = name_cell.text.strip()
+
+                            # Find magnet link
+                            magnet_link_elem = row.find("a", href=re.compile(r"^magnet:\?"))
+                            if not magnet_link_elem:
+                                continue
+
+                            magnet = magnet_link_elem["href"]
+
+                            # Find seeders/leechers
+                            font_cells = row.find_all("td", align="right")
+                            seeders = 0
+                            leechers = 0
+                            if len(font_cells) >= 2:
+                                try:
+                                    seeders = int(font_cells[0].text.strip())
+                                    leechers = int(font_cells[1].text.strip())
+                                except ValueError:
+                                    pass
+
+                            # Find size
+                            desc_cell = row.find("font", class_="detDesc")
+                            size = "Unknown"
+                            if desc_cell:
+                                size_match = re.search(
+                                    r"Size\s+([\d.]+\s*[KMGT]iB)",
+                                    desc_cell.text,
+                                )
+                                if size_match:
+                                    size = size_match.group(1)
+
+                            result = TorrentSearchResult(
+                                title=title,
+                                magnet_link=magnet,
+                                size=size,
+                                seeders=seeders,
+                                leechers=leechers,
+                                source="ThePirateBay",
+                                quality=self._detect_quality(title),
+                            )
+                            results.append(result)
+
+                        except Exception as e:
+                            logger.debug(f"Error parsing TPB row: {e}")
+                            continue
+
+                    if results:
+                        logger.info(f"Found {len(results)} results from TPB")
+                        return results
 
             except Exception as e:
                 logger.debug(f"Error searching TPB mirror {mirror}: {e}")
@@ -309,4 +304,3 @@ class TorrentSearcher:
 
 # Global searcher instance
 searcher = TorrentSearcher()
-

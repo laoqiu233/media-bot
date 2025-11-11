@@ -1,2 +1,1 @@
 """MPV player control module."""
-

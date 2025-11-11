@@ -1,11 +1,9 @@
 """Series scheduler for tracking watched episodes and recommendations."""
 
-import asyncio
 import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
 
 import aiofiles
 
@@ -28,7 +26,7 @@ class SeriesScheduler:
         self.progress_file = self.data_dir / "watch_progress.json"
 
         # In-memory storage
-        self._user_progress: Dict[int, Dict[str, UserWatchProgress]] = {}
+        self._user_progress: dict[int, dict[str, UserWatchProgress]] = {}
         self._loaded = False
 
     async def load_progress(self):
@@ -38,7 +36,7 @@ class SeriesScheduler:
             return
 
         try:
-            async with aiofiles.open(self.progress_file, "r", encoding="utf-8") as f:
+            async with aiofiles.open(self.progress_file, encoding="utf-8") as f:
                 content = await f.read()
                 data = json.loads(content)
 
@@ -51,9 +49,7 @@ class SeriesScheduler:
                         self._user_progress[user_id][media_id] = progress
 
             self._loaded = True
-            logger.info(
-                f"Loaded watch progress for {len(self._user_progress)} users"
-            )
+            logger.info(f"Loaded watch progress for {len(self._user_progress)} users")
 
         except Exception as e:
             logger.error(f"Error loading watch progress: {e}")
@@ -118,9 +114,7 @@ class SeriesScheduler:
             f"{progress.progress_percentage:.1f}%"
         )
 
-    async def get_progress(
-        self, user_id: int, media_id: str
-    ) -> Optional[UserWatchProgress]:
+    async def get_progress(self, user_id: int, media_id: str) -> UserWatchProgress | None:
         """Get watch progress for a specific media item.
 
         Args:
@@ -135,7 +129,7 @@ class SeriesScheduler:
 
         return self._user_progress.get(user_id, {}).get(media_id)
 
-    async def get_user_progress(self, user_id: int) -> List[UserWatchProgress]:
+    async def get_user_progress(self, user_id: int) -> list[UserWatchProgress]:
         """Get all watch progress for a user.
 
         Args:
@@ -150,9 +144,7 @@ class SeriesScheduler:
         user_progress = self._user_progress.get(user_id, {})
         return list(user_progress.values())
 
-    async def get_next_episode(
-        self, user_id: int, series: Series
-    ) -> Optional[Episode]:
+    async def get_next_episode(self, user_id: int, series: Series) -> Episode | None:
         """Get the next episode to watch for a series.
 
         Args:
@@ -169,21 +161,24 @@ class SeriesScheduler:
             await self.load_progress()
 
         # Find the last watched episode
-        last_watched_episode: Optional[Episode] = None
+        last_watched_episode: Episode | None = None
         last_season = 0
         last_episode = 0
 
         for episode in series.episodes:
             progress = await self.get_progress(user_id, episode.id)
-            if progress and progress.completed:
-                if (
+            if (
+                progress
+                and progress.completed
+                and (
                     episode.season_number > last_season
                     or episode.season_number == last_season
                     and episode.episode_number > last_episode
-                ):
-                    last_watched_episode = episode
-                    last_season = episode.season_number
-                    last_episode = episode.episode_number
+                )
+            ):
+                last_watched_episode = episode
+                last_season = episode.season_number
+                last_episode = episode.episode_number
 
         # If no episodes watched, return first episode
         if last_watched_episode is None:
@@ -201,7 +196,7 @@ class SeriesScheduler:
         # All episodes watched
         return None
 
-    async def get_continue_watching(self, user_id: int) -> List[UserWatchProgress]:
+    async def get_continue_watching(self, user_id: int) -> list[UserWatchProgress]:
         """Get list of media items to continue watching.
 
         Args:
@@ -217,9 +212,7 @@ class SeriesScheduler:
 
         # Filter for items that are in progress (not completed, and have some progress)
         continue_watching = [
-            p
-            for p in progress_list
-            if not p.completed and p.progress_percentage > 5
+            p for p in progress_list if not p.completed and p.progress_percentage > 5
         ]
 
         # Sort by last watched time
@@ -245,9 +238,7 @@ class SeriesScheduler:
 
         logger.info(f"Marked episode as watched: {episode.title} (user: {user_id})")
 
-    async def get_series_progress(
-        self, user_id: int, series: Series
-    ) -> Dict[str, any]:
+    async def get_series_progress(self, user_id: int, series: Series) -> dict[str, any]:
         """Get overall progress for a series.
 
         Args:
@@ -280,7 +271,7 @@ class SeriesScheduler:
             "next_episode": next_episode,
         }
 
-    async def get_watching_series(self, user_id: int) -> List[str]:
+    async def get_watching_series(self, user_id: int) -> list[str]:
         """Get list of series IDs that user is currently watching.
 
         Args:
@@ -294,17 +285,18 @@ class SeriesScheduler:
         # Extract unique series IDs from episode IDs
         series_ids = set()
         for progress in progress_list:
-            if not progress.completed and progress.progress_percentage > 0:
+            if (
+                not progress.completed
+                and progress.progress_percentage > 0
+                and "_s" in progress.media_id
+            ):
                 # Episode IDs are formatted as: {series_id}_s{season}e{episode}
-                if "_s" in progress.media_id:
-                    series_id = progress.media_id.split("_s")[0]
-                    series_ids.add(series_id)
+                series_id = progress.media_id.split("_s")[0]
+                series_ids.add(series_id)
 
         return list(series_ids)
 
-    async def schedule_reminder(
-        self, user_id: int, series_id: str, reminder_time: datetime
-    ):
+    async def schedule_reminder(self, user_id: int, series_id: str, reminder_time: datetime):
         """Schedule a reminder for new episodes.
 
         Args:
@@ -316,13 +308,11 @@ class SeriesScheduler:
             This is a placeholder for future implementation with telegram job_queue
         """
         # TODO: Implement with telegram job_queue
-        logger.info(
-            f"Reminder scheduled for user {user_id}, series {series_id} at {reminder_time}"
-        )
+        logger.info(f"Reminder scheduled for user {user_id}, series {series_id} at {reminder_time}")
 
     async def get_recommendations_for_user(
-        self, user_id: int, all_series: List[Series], limit: int = 5
-    ) -> List[Series]:
+        self, user_id: int, all_series: list[Series], limit: int = 5
+    ) -> list[Series]:
         """Get series recommendations based on watch history.
 
         Args:
@@ -362,7 +352,7 @@ class SeriesScheduler:
 
 
 # Global scheduler instance
-scheduler: Optional[SeriesScheduler] = None
+scheduler: SeriesScheduler | None = None
 
 
 def get_scheduler(data_dir: Path) -> SeriesScheduler:
@@ -378,4 +368,3 @@ def get_scheduler(data_dir: Path) -> SeriesScheduler:
     if scheduler is None:
         scheduler = SeriesScheduler(data_dir)
     return scheduler
-
