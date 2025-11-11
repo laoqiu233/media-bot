@@ -3,13 +3,12 @@
 import logging
 from pathlib import Path
 
-from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.bot.callback_data import (
     LIBRARY_CLEAR_FILTER,
     LIBRARY_CONFIRM_DELETE,
     LIBRARY_DELETE_MOVIE,
-    LIBRARY_FILTER,
     LIBRARY_MAIN,
     LIBRARY_MOVIES,
     LIBRARY_MOVIES_NEXT,
@@ -98,6 +97,7 @@ class LibraryScreen(Screen):
         else:
             movies = all_movies
             text = f"🎬 *Movies* ({len(movies)} total)\n\n"
+            text += "💡 _Send a message to filter movies_\n\n"
 
         if not movies:
             if filter_query:
@@ -153,14 +153,11 @@ class LibraryScreen(Screen):
         if nav_buttons:
             keyboard.append(nav_buttons)
 
-        # Filter controls
-        filter_buttons = []
+        # Clear filter button (only show when filter is active)
         if filter_query:
-            filter_buttons.append(
-                InlineKeyboardButton("❌ Clear Filter", callback_data=LIBRARY_CLEAR_FILTER)
+            keyboard.append(
+                [InlineKeyboardButton("❌ Clear Filter", callback_data=LIBRARY_CLEAR_FILTER)]
             )
-        filter_buttons.append(InlineKeyboardButton("🔍 Filter", callback_data=LIBRARY_FILTER))
-        keyboard.append(filter_buttons)
 
         # Back button
         keyboard.append([InlineKeyboardButton("« Back to Library", callback_data=LIBRARY_MAIN)])
@@ -323,12 +320,8 @@ class LibraryScreen(Screen):
             page = context.get_context().get("page", 0)
             context.update_context(page=page + 1)
 
-        elif query.data == LIBRARY_FILTER:
-            await query.answer("Please send a message with your search query.", show_alert=True)
-            context.update_context(filtering_mode=True)
-
         elif query.data == LIBRARY_CLEAR_FILTER:
-            context.update_context(filter_query="", page=0)
+            context.update_context(filter_query="", page=0, view="list")
             await query.answer("Filter cleared")
 
         elif query.data == LIBRARY_SCAN:
@@ -352,28 +345,23 @@ class LibraryScreen(Screen):
 
     async def handle_message(
         self,
-        update: Update,
+        message: Message,
         context: Context,
     ) -> ScreenHandlerResult:
         """Handle text messages for filtering."""
-        if not context.get_context().get("filtering_mode"):
+        # Only handle messages when in list view
+        view = context.get_context().get("view", "main")
+        if view != "list":
             return None
 
         # Get the search query from the message
-        query = update.message.text.strip()
+        query = message.text.strip()
 
         if not query:
-            await update.message.reply_text("Please enter a valid search query.")
             return None
 
         # Apply filter and reset to page 0
-        context.update_context(filter_query=query, page=0, filtering_mode=False, view="list")
-
-        # Delete the user's message to keep chat clean
-        from contextlib import suppress
-
-        with suppress(Exception):
-            await update.message.delete()
+        context.update_context(filter_query=query, page=0, view="list")
 
         return None  # Stay on current screen, will re-render with filter
 

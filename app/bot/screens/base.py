@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from telegram import CallbackQuery, InlineKeyboardMarkup, Update
+from telegram import CallbackQuery, InlineKeyboardMarkup, Message
 
 if TYPE_CHECKING:
     pass
@@ -63,7 +63,7 @@ class Screen(ABC):
 
     async def handle_message(
         self,
-        update: Update,
+        message: Message,
         context: Context,
     ) -> ScreenHandlerResult:
         """Handle text messages. Override in subclass if needed."""
