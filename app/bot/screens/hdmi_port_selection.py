@@ -39,7 +39,7 @@ class HDMIConnector:
 
 
 async def _detect_hdmi_connectors() -> list[HDMIConnector]:
-    """Detect HDMI connectors using modetest.
+    """Detect HDMI connectors using modetest with vc4 driver.
 
     Returns:
         List of HDMI connectors found
@@ -47,21 +47,33 @@ async def _detect_hdmi_connectors() -> list[HDMIConnector]:
     connectors = []
     try:
         loop = asyncio.get_event_loop()
-        # Run modetest -c to get connector information
+        # Run modetest -M vc4 -c to get connector information for Raspberry Pi
         result = await loop.run_in_executor(
             None,
             lambda: subprocess.run(
-                ["modetest", "-c"],
+                ["modetest", "-M", "vc4", "-c"],
                 check=False,
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=10,
             ),
         )
 
         if result.returncode != 0:
             logger.warning(f"modetest failed: {result.stderr}")
-            return connectors
+            # Try without -M vc4 as fallback
+            result = await loop.run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    ["modetest", "-c"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                ),
+            )
+            if result.returncode != 0:
+                return connectors
 
         # Parse modetest output
         # Format is typically:
@@ -69,7 +81,6 @@ async def _detect_hdmi_connectors() -> list[HDMIConnector]:
         # 28      0       connected       HDMI-A-1        0x0             1       27
         # 29      0       disconnected    HDMI-A-2        0x0             0       27
 
-        current_connector = None
         for line in result.stdout.splitlines():
             line = line.strip()
             if not line or line.startswith("id") or line.startswith("--"):
@@ -95,6 +106,8 @@ async def _detect_hdmi_connectors() -> list[HDMIConnector]:
 
     except FileNotFoundError:
         logger.warning("modetest utility not found. Install with: sudo apt install libdrm-tests")
+    except subprocess.TimeoutExpired:
+        logger.error("modetest command timed out")
     except Exception as e:
         logger.error(f"Error detecting HDMI connectors: {e}")
 
@@ -144,13 +157,26 @@ async def _get_connector_modes(connector_id: int) -> list[str]:
         result = await loop.run_in_executor(
             None,
             lambda: subprocess.run(
-                ["modetest", "-c", str(connector_id)],
+                ["modetest", "-M", "vc4", "-c", str(connector_id)],
                 check=False,
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=10,
             ),
         )
+        
+        # Fallback if vc4 fails
+        if result.returncode != 0:
+            result = await loop.run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    ["modetest", "-c", str(connector_id)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                ),
+            )
 
         if result.returncode == 0:
             # Parse modes from output
@@ -200,13 +226,26 @@ async def _set_hdmi_port(connector_id: int, connector_name: str) -> tuple[bool, 
         crtc_result = await loop.run_in_executor(
             None,
             lambda: subprocess.run(
-                ["modetest", "-p"],
+                ["modetest", "-M", "vc4", "-p"],
                 check=False,
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=10,
             ),
         )
+        
+        # Fallback if vc4 fails
+        if crtc_result.returncode != 0:
+            crtc_result = await loop.run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    ["modetest", "-p"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                ),
+            )
 
         crtc_id = None
         if crtc_result.returncode == 0:
@@ -244,11 +283,11 @@ async def _set_hdmi_port(connector_id: int, connector_name: str) -> tuple[bool, 
         set_result = await loop.run_in_executor(
             None,
             lambda: subprocess.run(
-                ["modetest", "-s", f"{connector_id}@{crtc_id}:{mode}"],
+                ["modetest", "-M", "vc4", "-s", f"{connector_id}@{crtc_id}:{mode}"],
                 check=False,
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=10,
             ),
         )
 
@@ -259,13 +298,26 @@ async def _set_hdmi_port(connector_id: int, connector_name: str) -> tuple[bool, 
             set_result2 = await loop.run_in_executor(
                 None,
                 lambda: subprocess.run(
-                    ["modetest", "-s", f"{connector_id}:{mode}"],
+                    ["modetest", "-M", "vc4", "-s", f"{connector_id}:{mode}"],
                     check=False,
                     capture_output=True,
                     text=True,
-                    timeout=5,
+                    timeout=10,
                 ),
             )
+            
+            # Fallback without -M vc4
+            if set_result2.returncode != 0:
+                set_result2 = await loop.run_in_executor(
+                    None,
+                    lambda: subprocess.run(
+                        ["modetest", "-s", f"{connector_id}:{mode}"],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    ),
+                )
 
             if set_result2.returncode == 0:
                 return True, f"Successfully switched to {connector_name} (mode: {mode})"
@@ -318,17 +370,20 @@ class HDMIPortSelectionScreen(Screen):
         else:
             text += "Current: Unknown\n\n"
 
-        text += "Available HDMI ports:\n"
+        # Separate connected and disconnected connectors
+        connected_connectors = [c for c in connectors if c.connected]
+        disconnected_connectors = [c for c in connectors if not c.connected]
+
+        if connected_connectors:
+            text += "✅ *Available HDMI ports (Connected):*\n"
+        else:
+            text += "⚠️ *No connected HDMI ports found*\n"
 
         keyboard = []
-        for connector in connectors:
-            status_icon = "✅" if connector.connected else "⚪"
-            button_text = f"{status_icon} {connector.name}"
+        for connector in connected_connectors:
+            button_text = connector.name
             if current_connector and connector.connector_id == current_connector.connector_id:
                 button_text = f"✓ {connector.name}"
-
-            if not connector.connected:
-                button_text += " (Disconnected)"
 
             keyboard.append(
                 [
@@ -337,6 +392,13 @@ class HDMIPortSelectionScreen(Screen):
                     )
                 ]
             )
+
+        # Show disconnected ports in text but not as buttons
+        if disconnected_connectors:
+            text += "\n⚪ *Disconnected HDMI ports:*\n"
+            for connector in disconnected_connectors:
+                text += f"• {connector.name} (ID: {connector.connector_id})\n"
+            text += "\n_Connect a display to enable these ports_\n"
 
         keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data=HDMI_PORT_BACK)])
 
