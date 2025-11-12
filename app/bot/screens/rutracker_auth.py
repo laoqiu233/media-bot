@@ -23,7 +23,13 @@ from app.bot.screens.base import (
     ScreenHandlerResult,
     ScreenRenderResult,
 )
-from app.init_flow import _project_root, ensure_rutracker_credentials
+from app.init_flow import ensure_rutracker_credentials
+
+
+def _project_root() -> Path:
+    """Get project root directory."""
+    # app/bot/screens/ -> project root
+    return Path(__file__).resolve().parents[3]
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +114,7 @@ class RuTrackerAuthScreen(Screen):
     def __init__(self):
         """Initialize RuTracker auth screen."""
         self._qr_proc: subprocess.Popen | None = None
+        self._loading_proc: subprocess.Popen | None = None
 
     def get_name(self) -> str:
         """Get screen name."""
@@ -164,6 +171,27 @@ class RuTrackerAuthScreen(Screen):
                     except Exception:
                         pass
                     self._qr_proc = None
+        
+        # Close loading GIF if it's showing
+        if self._loading_proc is not None:
+            try:
+                self._loading_proc.terminate()
+                try:
+                    await asyncio.wait_for(
+                        asyncio.to_thread(self._loading_proc.wait), timeout=0.5
+                    )
+                except asyncio.TimeoutError:
+                    self._loading_proc.kill()
+                    await asyncio.to_thread(self._loading_proc.wait)
+                self._loading_proc = None
+            except Exception:
+                if self._loading_proc is not None:
+                    try:
+                        if self._loading_proc.poll() is None:
+                            self._loading_proc.kill()
+                    except Exception:
+                        pass
+                    self._loading_proc = None
 
     async def render(self, context: Context) -> ScreenRenderResult:
         """Render the RuTracker authorization screen."""
@@ -232,14 +260,14 @@ class RuTrackerAuthScreen(Screen):
             )
         
         elif query.data == RUTRACKER_AUTH_QR:
-            # Generate and display QR code on TV screen
+            # Generate and display QR code on TV screen (following init_flow pattern)
             host_ip = _detect_local_ip()
             setup_url = f"http://{host_ip}:8766/"
             
             try:
                 await query.answer("Displaying QR code on screen...", show_alert=False)
                 
-                # Close any existing QR code display
+                # Close any existing displays
                 if self._qr_proc is not None:
                     try:
                         self._qr_proc.terminate()
@@ -254,8 +282,31 @@ class RuTrackerAuthScreen(Screen):
                         pass
                     self._qr_proc = None
                 
-                # Prepare QR code image path
+                if self._loading_proc is not None:
+                    try:
+                        self._loading_proc.terminate()
+                        try:
+                            await asyncio.wait_for(
+                                asyncio.to_thread(self._loading_proc.wait), timeout=0.5
+                            )
+                        except asyncio.TimeoutError:
+                            self._loading_proc.kill()
+                            await asyncio.to_thread(self._loading_proc.wait)
+                    except Exception:
+                        pass
+                    self._loading_proc = None
+                
+                # Show loading.gif first (like init_flow does)
                 project_root = _project_root()
+                loading_path = project_root / "loading.gif"
+                if loading_path.exists():
+                    try:
+                        self._loading_proc = await _display_with_mpv(loading_path)
+                        logger.info("Showing loading.gif before QR code...")
+                    except Exception as e:
+                        logger.warning(f"Could not show loading.gif: {e}")
+                
+                # Prepare QR code image path
                 tmp_dir = project_root / ".setup"
                 tmp_dir.mkdir(parents=True, exist_ok=True)
                 qr_png = tmp_dir / "rutracker_qr.png"
@@ -263,12 +314,37 @@ class RuTrackerAuthScreen(Screen):
                 # Generate QR code image
                 _generate_qr_png(setup_url, qr_png)
                 
-                # Display on TV screen using mpv
+                # Display QR code on TV screen using mpv
                 self._qr_proc = await _display_with_mpv(qr_png)
+                # QR code screen is now loaded - wait a moment to ensure it's visible
+                await asyncio.sleep(1.5)
+                
+                # NOW stop loading.gif after QR code screen is confirmed loaded and visible
+                if self._loading_proc is not None and self._qr_proc.poll() is None:
+                    try:
+                        self._loading_proc.terminate()
+                        try:
+                            await asyncio.wait_for(
+                                asyncio.to_thread(self._loading_proc.wait), timeout=1.0
+                            )
+                        except asyncio.TimeoutError:
+                            self._loading_proc.kill()
+                            await asyncio.to_thread(self._loading_proc.wait)
+                        logger.info("Stopped loading.gif after QR code screen loaded")
+                        self._loading_proc = None
+                    except Exception as e:
+                        logger.error(f"Error stopping loading.gif: {e}")
+                        try:
+                            if self._loading_proc and self._loading_proc.poll() is None:
+                                self._loading_proc.kill()
+                        except Exception:
+                            pass
+                        self._loading_proc = None
+                
                 logger.info(f"Displaying RuTracker QR code on screen: {setup_url}")
                 
             except Exception as e:
-                logger.error(f"Error displaying QR code: {e}")
+                logger.error(f"Error displaying QR code: {e}", exc_info=True)
                 await query.answer("Error displaying QR code", show_alert=True)
             
             # Stay on current screen
@@ -279,7 +355,6 @@ class RuTrackerAuthScreen(Screen):
             await query.answer("Checking status...", show_alert=False)
             
             # Reload environment from .env file
-            from app.init_flow import _project_root
             env_path = _project_root() / ".env"
             if env_path.exists():
                 content = env_path.read_text(encoding="utf-8")
