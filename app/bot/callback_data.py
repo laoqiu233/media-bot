@@ -47,10 +47,7 @@ PLAYER_STOP = "player:stop:"
 PLAYER_VOL_UP = "player:vol_up:"
 PLAYER_VOL_DOWN = "player:vol_down:"
 PLAYER_SEEK = "player:seek:"  # Followed by seconds (can be negative)
-PLAYER_SMART_REWIND = "player:smart_rewind:"
 
-# Smart Rewind screen callbacks
-SMART_REWIND_BACK = "smart_rewind:back:"
 
 # TV screen callbacks
 TV_BACK = "tv:back:"
