@@ -839,9 +839,8 @@ async def ensure_telegram_token(force: bool = False) -> None:
         setup_completed = True
         print("[init] Wi‑Fi connection established successfully.")
 
-        if mpv_proc and mpv_proc.poll() is None:
-            with suppress(Exception):
-                mpv_proc.terminate()
+        # Don't close QR code screen here - let the main flow handle it
+        # This ensures loading.gif is shown before closing the QR code screen
 
         return True, None
 
@@ -933,7 +932,8 @@ async def ensure_telegram_token(force: bool = False) -> None:
                 await asyncio.sleep(1.5)
                 
                 # NOW stop loading.gif after QR code screen is confirmed loaded and visible
-                if loading_proc is not None:
+                # Do this immediately while we know mpv_proc is still running
+                if loading_proc is not None and mpv_proc.poll() is None:
                     try:
                         loading_proc.terminate()
                         try:
@@ -951,6 +951,9 @@ async def ensure_telegram_token(force: bool = False) -> None:
                                 loading_proc.kill()
                         except Exception:
                             pass
+                elif mpv_proc.poll() is not None:
+                    # QR code screen already closed (user submitted form), loading.gif should stay
+                    print("[init] QR code screen already closed, keeping loading.gif")
             except FileNotFoundError:
                 mpv_failed = True
                 print(
