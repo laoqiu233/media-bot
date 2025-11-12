@@ -7,7 +7,7 @@ MAIN_MENU_DOWNLOADS = "main_menu:downloads:"
 MAIN_MENU_PLAYER = "main_menu:player:"
 MAIN_MENU_TV = "main_menu:tv:"
 MAIN_MENU_STATUS = "main_menu:status:"
-MAIN_MENU_SETUP = "main_menu:setup:"
+MAIN_MENU_SYSTEM_CONTROL = "main_menu:system_control:"
 
 # Search screen callbacks
 SEARCH_BACK = "search:back:"
@@ -64,6 +64,25 @@ STATUS_BACK = "status:back:"
 # Setup confirmation screen callbacks
 SETUP_CONFIRM = "setup:confirm:"
 SETUP_CANCEL = "setup:cancel:"
+
+# System control screen callbacks
+SYSTEM_CONTROL_BACK = "system_control:back:"
+SYSTEM_CONTROL_SETUP = "system_control:setup:"
+SYSTEM_CONTROL_HDMI_PORT = "system_control:hdmi_port:"
+SYSTEM_CONTROL_RESOLUTION = "system_control:resolution:"
+SYSTEM_CONTROL_AUDIO_OUTPUT = "system_control:audio_output:"
+
+# HDMI port selection callbacks
+HDMI_PORT_BACK = "hdmi_port:back:"
+HDMI_PORT_SELECT = "hdmi_port:select:"  # Followed by port (0, 1, or auto)
+
+# Resolution selection callbacks
+RESOLUTION_BACK = "resolution:back:"
+RESOLUTION_SELECT = "resolution:select:"  # Followed by resolution (e.g., "1920x1080")
+
+# Audio output selection callbacks
+AUDIO_OUTPUT_BACK = "audio_output:back:"
+AUDIO_OUTPUT_SELECT = "audio_output:select:"  # Followed by output type (e.g., "hdmi", "analog", "auto")
 
 # Movie selection screen callbacks
 MOVIE_SELECT = "movie:select:"  # Followed by movie index

@@ -9,8 +9,8 @@ from app.bot.callback_data import (
     MAIN_MENU_LIBRARY,
     MAIN_MENU_PLAYER,
     MAIN_MENU_SEARCH,
-    MAIN_MENU_SETUP,
     MAIN_MENU_STATUS,
+    MAIN_MENU_SYSTEM_CONTROL,
     MAIN_MENU_TV,
 )
 from app.bot.screens.base import (
@@ -47,7 +47,7 @@ class MainMenuScreen(Screen):
                 InlineKeyboardButton("📺 TV Control", callback_data=MAIN_MENU_TV),
                 InlineKeyboardButton("ℹ️ System Status", callback_data=MAIN_MENU_STATUS),
             ],
-            [InlineKeyboardButton("🛠 Wi‑Fi / Token Setup", callback_data=MAIN_MENU_SETUP)],
+            [InlineKeyboardButton("⚙️ System Control", callback_data=MAIN_MENU_SYSTEM_CONTROL)],
         ]
 
         return text, InlineKeyboardMarkup(keyboard), RenderOptions()
@@ -75,5 +75,5 @@ class MainMenuScreen(Screen):
         elif query.data == MAIN_MENU_STATUS:
             return Navigation(next_screen="status")
 
-        elif query.data == MAIN_MENU_SETUP:
-            return Navigation(next_screen="setup_confirmation")
+        elif query.data == MAIN_MENU_SYSTEM_CONTROL:
+            return Navigation(next_screen="system_control")

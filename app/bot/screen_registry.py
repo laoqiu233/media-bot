@@ -1,13 +1,17 @@
 from app.bot.screens import (
+    AudioOutputSelectionScreen,
     DownloadsScreen,
+    HDMIPortSelectionScreen,
     LibraryScreen,
     MainMenuScreen,
     MovieSelectionScreen,
     PlayerScreen,
+    ResolutionSelectionScreen,
     Screen,
     SearchScreen,
     SetupConfirmationScreen,
     StatusScreen,
+    SystemControlScreen,
     TorrentProvidersScreen,
     TorrentResultsScreen,
     TVScreen,
@@ -41,6 +45,10 @@ class ScreenRegistry:
         self.status_screen = StatusScreen(mpv_controller, cec_controller, torrent_downloader, library_manager)
         self.tv_screen = TVScreen(cec_controller)
         self.setup_confirmation_screen = SetupConfirmationScreen()
+        self.system_control_screen = SystemControlScreen()
+        self.hdmi_port_selection_screen = HDMIPortSelectionScreen()
+        self.resolution_selection_screen = ResolutionSelectionScreen()
+        self.audio_output_selection_screen = AudioOutputSelectionScreen()
         self.screens = [
             self.main_menu,
             self.search_screen,
@@ -53,6 +61,10 @@ class ScreenRegistry:
             self.status_screen,
             self.tv_screen,
             self.setup_confirmation_screen,
+            self.system_control_screen,
+            self.hdmi_port_selection_screen,
+            self.resolution_selection_screen,
+            self.audio_output_selection_screen,
         ]
         self.screens_by_name = {screen.get_name(): screen for screen in self.screens}
 
