@@ -134,7 +134,7 @@ class TVScreen(Screen):
     async def _tv_on(self, query: CallbackQuery) -> None:
         try:
             current_cmd = self.cec.get_current_command()
-            status_msg = f"Running: {current_cmd}" if current_cmd else "Turning TV on..."
+            status_msg = f"Turning TV on..."
             await query.answer(status_msg)
             success = await self.cec.tv_on()
 
@@ -150,7 +150,7 @@ class TVScreen(Screen):
     async def _tv_off(self, query: CallbackQuery) -> None:
         try:
             current_cmd = self.cec.get_current_command()
-            status_msg = f"Running: {current_cmd}" if current_cmd else "Turning TV off..."
+            status_msg = f"Turning TV off..."
             await query.answer(status_msg)
             success = await self.cec.tv_off()
 
@@ -166,7 +166,7 @@ class TVScreen(Screen):
     async def _set_active_source(self, query: CallbackQuery) -> None:
         try:
             current_cmd = self.cec.get_current_command()
-            status_msg = f"Running: {current_cmd}" if current_cmd else "Setting active source..."
+            status_msg = f"Setting active source..."
             await query.answer(status_msg)
             success = await self.cec.set_active_source()
 
@@ -204,7 +204,7 @@ class TVScreen(Screen):
     async def _mute(self, query: CallbackQuery) -> None:
         try:
             current_cmd = self.cec.get_current_command()
-            status_msg = f"Running: {current_cmd}" if current_cmd else "Muting..."
+            status_msg = f"Muting..."
             await query.answer(status_msg)
             success = await self.cec.mute()
             await query.answer("🔇 Mute toggled" if success else "Failed")
