@@ -304,13 +304,14 @@ class MPVController:
             return False
 
         try:
+            await self._show_loading_gif()
+            await asyncio.sleep(1.5)
+
             self._player.stop()
             self._is_playing = False
             self._current_file = None
             logger.info("Playback stopped")
             # Wait 1.5 seconds for video to fully stop and disappear before showing loading.gif
-            await asyncio.sleep(1.5)
-            await self._show_loading_gif()
             return True
         except Exception as e:
             logger.error(f"Error stopping playback: {e}")
