@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,9 @@ class CECController:
         self._lock = asyncio.Lock()  # Lock to prevent concurrent cec-ctl usage
         self._persistent_process: Optional[asyncio.subprocess.Process] = None
         self._current_command: Optional[str] = None  # Track current running command
+        self._status_cache: Optional[dict] = None  # Cached status
+        self._status_cache_time: float = 0.0  # Timestamp of cached status
+        self._status_cache_ttl: float = 5.0  # Cache TTL in seconds
 
     async def check_availability(self) -> bool:
         """Check if CEC is available on the system.
@@ -209,23 +213,37 @@ class CECController:
         return success
 
     async def volume_up(self) -> bool:
-        """Increase TV volume.
+        """Increase TV volume by 5 steps.
 
         Returns:
             True if successful
         """
-        logger.info("Increasing TV volume")
-        success, _ = await self._send_cec_command(["--to", "0", "--user-control-pressed", "ui-cmd=volume-up"])
+        logger.info("Increasing TV volume by 5")
+        # Send volume up command 5 times
+        success = True
+        for _ in range(5):
+            result, _ = await self._send_cec_command(["--to", "0", "--user-control-pressed", "ui-cmd=volume-up"])
+            if not result:
+                success = False
+            # Small delay between commands to avoid overwhelming the TV
+            await asyncio.sleep(0.1)
         return success
 
     async def volume_down(self) -> bool:
-        """Decrease TV volume.
+        """Decrease TV volume by 5 steps.
 
         Returns:
             True if successful
         """
-        logger.info("Decreasing TV volume")
-        success, _ = await self._send_cec_command(["--to", "0", "--user-control-pressed", "ui-cmd=volume-down"])
+        logger.info("Decreasing TV volume by 5")
+        # Send volume down command 5 times
+        success = True
+        for _ in range(5):
+            result, _ = await self._send_cec_command(["--to", "0", "--user-control-pressed", "ui-cmd=volume-down"])
+            if not result:
+                success = False
+            # Small delay between commands to avoid overwhelming the TV
+            await asyncio.sleep(0.1)
         return success
 
     async def mute(self) -> bool:
@@ -304,23 +322,42 @@ class CECController:
 
     async def get_status(self) -> dict:
         """Get overall CEC status.
+        
+        Uses caching to avoid frequent cec-ctl calls. Cache expires after 5 seconds.
 
         Returns:
             Status dictionary
         """
+        current_time = time.time()
+        
+        # Return cached status if it's still valid
+        if (
+            self._status_cache is not None
+            and (current_time - self._status_cache_time) < self._status_cache_ttl
+        ):
+            # Update current_command in cached result (this changes frequently)
+            if self._status_cache:
+                self._status_cache["current_command"] = self.get_current_command()
+            return self._status_cache
+        
+        # Cache expired or doesn't exist, fetch fresh status
         available = await self.check_availability()
         if not available:
-            return {
+            status = {
                 "available": False,
                 "enabled": self.enabled,
                 "error": "CEC not available",
                 "current_command": self.get_current_command(),
             }
+            # Cache the result
+            self._status_cache = status
+            self._status_cache_time = current_time
+            return status
 
         power_status = await self.get_power_status()
         osd_name = await self.get_osd_name()
 
-        return {
+        status = {
             "available": True,
             "enabled": self.enabled,
             "device": self.cec_device,
@@ -328,6 +365,12 @@ class CECController:
             "tv_name": osd_name,
             "current_command": self.get_current_command(),
         }
+        
+        # Cache the result
+        self._status_cache = status
+        self._status_cache_time = current_time
+        
+        return status
 
 
 # Global CEC controller instance
