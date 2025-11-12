@@ -78,8 +78,8 @@ class TVScreen(Screen):
                         ),
                     ],
                     [
-                        InlineKeyboardButton("🔊 Volume +5", callback_data=TV_VOL_UP),
                         InlineKeyboardButton("🔉 Volume -5", callback_data=TV_VOL_DOWN),
+                        InlineKeyboardButton("🔊 Volume +5", callback_data=TV_VOL_UP),
                     ],
                     [
                         InlineKeyboardButton("🔇 Mute", callback_data=TV_MUTE),
@@ -182,7 +182,7 @@ class TVScreen(Screen):
     async def _volume_up(self, query: CallbackQuery) -> None:
         try:
             current_cmd = self.cec.get_current_command()
-            status_msg = f"Running: {current_cmd}" if current_cmd else "Volume up +5..."
+            status_msg = f"Volume up +5..."
             await query.answer(status_msg)
             success = await self.cec.volume_up()
             await query.answer("🔊 Volume up +5" if success else "Failed")
@@ -193,7 +193,7 @@ class TVScreen(Screen):
     async def _volume_down(self, query: CallbackQuery) -> None:
         try:
             current_cmd = self.cec.get_current_command()
-            status_msg = f"Running: {current_cmd}" if current_cmd else "Volume down -5..."
+            status_msg = f"Volume down -5..."
             await query.answer(status_msg)
             success = await self.cec.volume_down()
             await query.answer("🔉 Volume down -5" if success else "Failed")
