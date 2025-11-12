@@ -301,6 +301,17 @@ class MPVController:
         try:
             self._player.pause = True
             self._is_playing = False
+            
+            # Ensure downloads are paused when video is paused
+            # This handles cases where downloads might have started/resumed after play()
+            if self._downloader is not None:
+                try:
+                    paused_count = await self._downloader.pause_all_downloads()
+                    if paused_count > 0:
+                        logger.info(f"Paused {paused_count} downloads when video was paused")
+                except Exception as e:
+                    logger.error(f"Error pausing downloads when video paused: {e}")
+            
             logger.info("Playback paused")
             return True
         except Exception as e:
