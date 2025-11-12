@@ -589,7 +589,7 @@ class MPVController:
                     logger.error(f"Error in event handler for {event}: {e}")
 
     async def _show_loading_gif(self) -> None:
-        """Display loading.gif on TV when no media is playing."""
+        """Display loading3.gif on TV when no media is playing."""
         if self._loading_proc is not None:
             # Check if the process is still running
             if self._loading_proc.poll() is None:
@@ -615,7 +615,7 @@ class MPVController:
                     )
                     if result.returncode == 0:
                         # Process exists, reuse it
-                        logger.info(f"Reusing existing loading.gif process (PID {loading_pid})")
+                        logger.info(f"Reusing existing loading3.gif process (PID {loading_pid})")
                         os.environ.pop("MEDIA_BOT_LOADING_PID", None)
                         # Store PID for later cleanup
                         self._loading_proc_pid = loading_pid
@@ -635,13 +635,13 @@ class MPVController:
             
             # Find project root (assuming this file is in app/player/)
             project_root = Path(__file__).resolve().parents[2]
-            loading_path = project_root / "loading.gif"
+            loading_path = project_root / "loading3.gif"
             
             if not loading_path.exists():
-                logger.debug("loading.gif not found, skipping display")
+                logger.debug("loading3.gif not found, skipping display")
                 return
             
-            # Display loading.gif with mpv (similar to QR code display)
+            # Display loading3.gif with mpv (similar to QR code display)
             cmd = [
                 "mpv",
                 "--no-terminal",
@@ -666,14 +666,14 @@ class MPVController:
             self._loading_proc = subprocess.Popen(
                 cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
-            logger.info("Displaying loading.gif on TV (media loading...)")
+            logger.info("Displaying loading3.gif on TV (media loading...)")
         except Exception as e:
-            logger.debug(f"Could not display loading.gif: {e}")
+            logger.debug(f"Could not display loading3.gif: {e}")
 
     async def _hide_loading_gif(self) -> None:
-        """Hide loading.gif when media starts playing.
+        """Hide loading3.gif when media starts playing.
         
-        Actually terminate the loading.gif process to avoid running 2 MPV instances
+        Actually terminate the loading3.gif process to avoid running 2 MPV instances
         on Raspberry Pi, which causes performance issues.
         """
         # Handle PID-based process from init_flow
@@ -688,10 +688,10 @@ class MPVController:
                     capture_output=True,
                     timeout=1.0,
                 )
-                logger.info(f"Terminated loading.gif (PID {self._loading_proc_pid}) - video is now playing")
+                logger.info(f"Terminated loading3.gif (PID {self._loading_proc_pid}) - video is now playing")
                 self._loading_proc_pid = None
             except Exception as e:
-                logger.debug(f"Error terminating loading.gif by PID: {e}")
+                logger.debug(f"Error terminating loading3.gif by PID: {e}")
                 self._loading_proc_pid = None
         
         if self._loading_proc is None:
@@ -714,11 +714,11 @@ class MPVController:
                     self._loading_proc.kill()
                     await asyncio.to_thread(self._loading_proc.wait)
                 
-                logger.info("Terminated loading.gif - video is now playing")
+                logger.info("Terminated loading3.gif - video is now playing")
             
             self._loading_proc = None
         except Exception as e:
-            logger.debug(f"Error terminating loading.gif: {e}")
+            logger.debug(f"Error terminating loading3.gif: {e}")
             # Try to kill it anyway
             try:
                 if self._loading_proc and self._loading_proc.poll() is None:

@@ -27,7 +27,7 @@ class CECController:
         self._current_command: Optional[str] = None  # Track current running command
         self._status_cache: Optional[dict] = None  # Cached status
         self._status_cache_time: float = 0.0  # Timestamp of cached status
-        self._status_cache_ttl: float = 5.0  # Cache TTL in seconds
+        self._status_cache_ttl: float = 60.0  # Cache TTL in seconds (60 seconds)
 
     async def check_availability(self) -> bool:
         """Check if CEC is available on the system.
@@ -323,7 +323,7 @@ class CECController:
     async def get_status(self) -> dict:
         """Get overall CEC status.
         
-        Uses caching to avoid frequent cec-ctl calls. Cache expires after 5 seconds.
+        Uses caching to avoid frequent cec-ctl calls. Cache expires after 60 seconds.
 
         Returns:
             Status dictionary
