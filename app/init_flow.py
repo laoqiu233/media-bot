@@ -393,58 +393,51 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     offset_x = (width - content_width) // 2 if content_width < width else 0
     offset_y = (height - content_height) // 2 if content_height < height else 0
     
-    # Create base image with stunning multi-layer gradient background
-    img = Image.new("RGB", (width, height), color=(8, 8, 18))
+    # Create base image with form-style dark gradient background
+    # Match the form's radial gradient: #1e293b -> #0f172a -> #020617
+    img = Image.new("RGB", (width, height), color=(2, 6, 23))  # #020617
     draw = ImageDraw.Draw(img)
     
-    # Layer 1: Beautiful diagonal gradient background (purple to blue to cyan)
-    for y in range(height):
-        ratio = y / height if height > 0 else 0
-        # Rich color transitions with more vibrant colors
-        r = int(8 + (25 - 8) * ratio + 12 * (1 - abs(ratio - 0.3) * 2))
-        g = int(8 + (35 - 8) * ratio + 15 * (1 - abs(ratio - 0.5) * 2))
-        b = int(18 + (55 - 18) * ratio + 20 * (1 - abs(ratio - 0.7) * 2))
-        # Add horizontal variation for more depth
-        for x in range(0, width, 2):
-            h_ratio = x / width if width > 0 else 0
-            r_var = int(r + 3 * (1 - abs(h_ratio - 0.5) * 2))
-            g_var = int(g + 4 * (1 - abs(h_ratio - 0.5) * 2))
-            b_var = int(b + 5 * (1 - abs(h_ratio - 0.5) * 2))
-            draw.line([(x, y), (min(x + 2, width), y)], fill=(r_var, g_var, b_var))
-    
-    # Layer 2: Multiple radial glows for depth and atmosphere
-    center_x, center_y = width // 2, height // 2
+    # Layer 1: Radial gradient matching form style (optimized for large screens)
+    center_x, center_y = width // 2, height // 3  # Top center like form
     max_radius = int((width ** 2 + height ** 2) ** 0.5)
+    step = max(2, width // 800)  # Adaptive step for performance
+    
+    for radius in range(max_radius, 0, -step * 5):
+        # Colors matching form: #1e293b (30, 41, 59) -> #0f172a (15, 23, 42) -> #020617 (2, 6, 23)
+        ratio = radius / max_radius if max_radius > 0 else 0
+        if ratio > 0.45:  # Outer area - #1e293b
+            r, g, b = 30, 41, 59
+        elif ratio > 0.25:  # Middle area - #0f172a
+            r, g, b = 15, 23, 42
+        else:  # Inner area - #020617
+            r, g, b = 2, 6, 23
+        
+        # Draw radial gradient circle
+        overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        overlay_draw = ImageDraw.Draw(overlay)
+        overlay_draw.ellipse(
+            [center_x - radius, center_y - radius, center_x + radius, center_y + radius],
+            fill=(r, g, b, 255)
+        )
+        img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+        draw = ImageDraw.Draw(img)
+    
+    # Subtle accent glows (matching form's subtle style)
+    # Less intense than before to match form aesthetic
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     overlay_draw = ImageDraw.Draw(overlay)
     
-    # Primary center glow (cyan-blue)
-    for radius in range(max_radius, 0, -15):
-        alpha = int(25 * (1 - radius / max_radius) ** 1.5)
+    # Subtle blue accent glow (matching form's button colors)
+    glow_center_x, glow_center_y = width // 2, height // 2
+    glow_radius = min(width, height) // 3
+    for radius in range(glow_radius, 0, -20):
+        alpha = int(8 * (1 - radius / glow_radius) ** 2)  # Much more subtle
         if alpha > 0:
             overlay_draw.ellipse(
-                [center_x - radius, center_y - radius, center_x + radius, center_y + radius],
-                fill=(100, 180, 255, alpha)
-            )
-    
-    # Secondary glow (purple, offset)
-    glow2_x, glow2_y = width // 4, height // 3
-    for radius in range(max_radius // 2, 0, -12):
-        alpha = int(15 * (1 - radius / (max_radius // 2)) ** 1.5)
-        if alpha > 0:
-            overlay_draw.ellipse(
-                [glow2_x - radius, glow2_y - radius, glow2_x + radius, glow2_y + radius],
-                fill=(180, 100, 255, alpha)
-            )
-    
-    # Tertiary glow (teal, offset)
-    glow3_x, glow3_y = width * 3 // 4, height * 2 // 3
-    for radius in range(max_radius // 2, 0, -12):
-        alpha = int(15 * (1 - radius / (max_radius // 2)) ** 1.5)
-        if alpha > 0:
-            overlay_draw.ellipse(
-                [glow3_x - radius, glow3_y - radius, glow3_x + radius, glow3_y + radius],
-                fill=(100, 255, 220, alpha)
+                [glow_center_x - radius, glow_center_y - radius, 
+                 glow_center_x + radius, glow_center_y + radius],
+                fill=(59, 130, 246, alpha)  # Blue matching form buttons
             )
     
     img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
@@ -566,91 +559,72 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     wifi_qr_x = offset_x + padding
     url_qr_x = offset_x + padding + qr_size + qr_spacing
     
-    # Create stunning card containers with multiple shadow layers and highlights
-    # Create shadow layer for QR cards with multiple shadow passes
+    # Create card containers matching form style (rgba(15, 23, 42, 0.92) with backdrop blur effect)
+    card_bg_color = (15, 23, 42)  # Matching form card background
+    card_border_color = (148, 163, 184)  # Matching form border rgba(148, 163, 184, 0.25)
+    
+    # Draw card backgrounds with form-style shadow
     shadow_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     shadow_draw = ImageDraw.Draw(shadow_layer)
     
-    # Multiple shadow layers for depth (WiFi card)
-    for i, (offset, alpha) in enumerate([(12, 150), (8, 100), (4, 60)]):
-        wifi_shadow_rect = [
-            wifi_qr_x - card_border + offset,
-            qr_y - card_border + offset,
-            wifi_qr_x + qr_size + card_border + offset,
-            qr_y + qr_size + card_border + offset,
-        ]
-        shadow_draw.rectangle(wifi_shadow_rect, fill=(0, 0, 0, alpha))
+    # Form-style shadow (softer, more subtle)
+    shadow_offset = int(8 * scale_factor)
+    for offset in range(shadow_offset, 0, -2):
+        alpha = int(65 * (1 - offset / shadow_offset) ** 0.5)  # Softer shadow
+        if alpha > 0:
+            # WiFi card shadow
+            wifi_shadow_rect = [
+                wifi_qr_x - card_border + offset,
+                qr_y - card_border + offset,
+                wifi_qr_x + qr_size + card_border + offset,
+                qr_y + qr_size + card_border + offset,
+            ]
+            shadow_draw.rectangle(wifi_shadow_rect, fill=(0, 0, 0, alpha))
+            # URL card shadow
+            url_shadow_rect = [
+                url_qr_x - card_border + offset,
+                qr_y - card_border + offset,
+                url_qr_x + qr_size + card_border + offset,
+                qr_y + qr_size + card_border + offset,
+            ]
+            shadow_draw.rectangle(url_shadow_rect, fill=(0, 0, 0, alpha))
     
-    # Multiple shadow layers for depth (URL card)
-    for i, (offset, alpha) in enumerate([(12, 150), (8, 100), (4, 60)]):
-        url_shadow_rect = [
-            url_qr_x - card_border + offset,
-            qr_y - card_border + offset,
-            url_qr_x + qr_size + card_border + offset,
-            qr_y + qr_size + card_border + offset,
-        ]
-        shadow_draw.rectangle(url_shadow_rect, fill=(0, 0, 0, alpha))
-    
-    # Composite shadow layer
     img = Image.alpha_composite(img.convert("RGBA"), shadow_layer).convert("RGB")
     draw = ImageDraw.Draw(img)
     
-    # Draw WiFi QR card background with subtle gradient (white to very light blue)
+    # Draw card backgrounds (matching form card style)
     wifi_card_rect = [
         wifi_qr_x - card_border,
         qr_y - card_border,
         wifi_qr_x + qr_size + card_border,
         qr_y + qr_size + card_border,
     ]
-    # Draw gradient background for card
-    for y_offset in range(card_border * 2 + qr_size):
-        ratio = y_offset / (card_border * 2 + qr_size) if (card_border * 2 + qr_size) > 0 else 0
-        color_val = int(255 - 2 * ratio)  # Subtle gradient from white to very light
-        draw.line(
-            [
-                (wifi_qr_x - card_border, qr_y - card_border + y_offset),
-                (wifi_qr_x + qr_size + card_border, qr_y - card_border + y_offset),
-            ],
-            fill=(color_val, color_val, 255),
-        )
-    
-    # Draw URL QR card background with subtle gradient
     url_card_rect = [
         url_qr_x - card_border,
         qr_y - card_border,
         url_qr_x + qr_size + card_border,
         qr_y + qr_size + card_border,
     ]
-    for y_offset in range(card_border * 2 + qr_size):
-        ratio = y_offset / (card_border * 2 + qr_size) if (card_border * 2 + qr_size) > 0 else 0
-        color_val = int(255 - 2 * ratio)
-        draw.line(
-            [
-                (url_qr_x - card_border, qr_y - card_border + y_offset),
-                (url_qr_x + qr_size + card_border, qr_y - card_border + y_offset),
-            ],
-            fill=(color_val, 255, color_val),
-        )
     
-    # Add subtle highlight on top edge of cards
-    highlight_width = 2
+    # Card background with slight transparency effect
+    card_overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    card_draw = ImageDraw.Draw(card_overlay)
+    card_draw.rectangle(wifi_card_rect, fill=(*card_bg_color, 235))  # ~0.92 opacity
+    card_draw.rectangle(url_card_rect, fill=(*card_bg_color, 235))
+    img = Image.alpha_composite(img.convert("RGBA"), card_overlay).convert("RGB")
+    draw = ImageDraw.Draw(img)
+    
+    # Card borders (matching form border style)
+    border_width = max(1, int(scale_factor))
     draw.rectangle(
-        [
-            wifi_qr_x - card_border,
-            qr_y - card_border,
-            wifi_qr_x + qr_size + card_border,
-            qr_y - card_border + highlight_width,
-        ],
-        fill=(255, 255, 255),
+        [wifi_qr_x - card_border, qr_y - card_border,
+         wifi_qr_x + qr_size + card_border, qr_y + qr_size + card_border],
+        outline=card_border_color, width=border_width
     )
     draw.rectangle(
-        [
-            url_qr_x - card_border,
-            qr_y - card_border,
-            url_qr_x + qr_size + card_border,
-            qr_y - card_border + highlight_width,
-        ],
-        fill=(255, 255, 255),
+        [url_qr_x - card_border, qr_y - card_border,
+         url_qr_x + qr_size + card_border, qr_y + qr_size + card_border],
+        outline=card_border_color, width=border_width
     )
     
     # Paste QR codes on white backgrounds

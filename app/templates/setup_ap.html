@@ -67,6 +67,10 @@
         font-size: 0.98rem;
         border: 1px solid rgba(148, 163, 184, 0.35);
         color: #f8fafc;
+        word-break: break-all;
+        overflow-wrap: break-word;
+        max-width: 60%;
+        text-align: right;
       }
       .tips {
         margin: 0 0 1.35rem 1.1rem;
@@ -129,10 +133,12 @@
         }
         code {
           width: 100%;
-          text-align: center;
+          text-align: left;
           padding: 10px 12px;
           font-size: 0.95rem;
           word-break: break-all;
+          overflow-wrap: break-word;
+          max-width: 100%;
         }
         button {
           padding: 1rem;

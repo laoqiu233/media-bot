@@ -93,7 +93,7 @@ class MPVController:
             def file_loaded_callback(event):
                 self._is_playing = True
                 self._trigger_event("file_loaded", event)
-                # Hide loading.gif when file loads
+                # Hide loading.gif when file loads - actually terminate it now
                 asyncio.create_task(self._hide_loading_gif())
 
             logger.info("MPV player initialized successfully")
@@ -151,7 +151,7 @@ class MPVController:
                 logger.info(f"File size: {file_path.stat().st_size / (1024*1024):.2f} MB")
 
                 # Load and play the file first (this will switch to video screen)
-                # Don't hide loading.gif - it will stay in background, video will be on top
+                # The file-loaded event will handle stopping loading.gif
                 self._player.loadfile(str(file_path))
                 self._current_file = file_path
 
@@ -160,7 +160,8 @@ class MPVController:
                 self._is_playing = True
 
                 # Give MPV a moment to start and switch to video
-                await asyncio.sleep(0.5)
+                # The file-loaded event will terminate loading.gif when video is ready
+                await asyncio.sleep(0.3)
 
                 # Verify playback actually started
                 try:
@@ -552,12 +553,41 @@ class MPVController:
     async def _hide_loading_gif(self) -> None:
         """Hide loading.gif when media starts playing.
         
-        Note: We don't actually terminate it - just let it run in background.
-        The video/image will be on top, and loading.gif will be behind.
+        Actually terminate the loading.gif process to avoid running 2 MPV instances
+        on Raspberry Pi, which causes performance issues.
         """
-        # Don't terminate - just let it run in background
-        # When video/image loads, it will naturally be on top
-        pass
+        if self._loading_proc is None:
+            return
+        
+        try:
+            # Wait a tiny bit to ensure video is actually visible
+            await asyncio.sleep(0.2)
+            
+            # Terminate the loading.gif process
+            if self._loading_proc.poll() is None:  # Still running
+                self._loading_proc.terminate()
+                try:
+                    # Wait up to 1 second for graceful termination
+                    await asyncio.wait_for(
+                        asyncio.to_thread(self._loading_proc.wait), timeout=1.0
+                    )
+                except asyncio.TimeoutError:
+                    # Force kill if it doesn't terminate
+                    self._loading_proc.kill()
+                    await asyncio.to_thread(self._loading_proc.wait)
+                
+                logger.info("Terminated loading.gif - video is now playing")
+            
+            self._loading_proc = None
+        except Exception as e:
+            logger.debug(f"Error terminating loading.gif: {e}")
+            # Try to kill it anyway
+            try:
+                if self._loading_proc and self._loading_proc.poll() is None:
+                    self._loading_proc.kill()
+            except Exception:
+                pass
+            self._loading_proc = None
 
 
 # Global player instance
