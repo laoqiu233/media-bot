@@ -104,12 +104,12 @@ class PlayerScreen(Screen):
                         InlineKeyboardButton("⏩⏩ +5m", callback_data=f"{PLAYER_SEEK}300"),
                     ],
                     [
-                        InlineKeyboardButton("🔊 Player Vol+", callback_data=PLAYER_VOL_UP),
-                        InlineKeyboardButton("🔉 Player Vol-", callback_data=PLAYER_VOL_DOWN),
+                        InlineKeyboardButton("🔉 Player Volume -5", callback_data=PLAYER_VOL_DOWN),
+                        InlineKeyboardButton("🔊 Player Volume +5", callback_data=PLAYER_VOL_UP),
                     ],
                     [
-                        InlineKeyboardButton("🔊 TV Volume +5", callback_data=TV_VOL_UP),
                         InlineKeyboardButton("🔉 TV Volume -5", callback_data=TV_VOL_DOWN),
+                        InlineKeyboardButton("🔊 TV Volume +5", callback_data=TV_VOL_UP),
                     ],
                     [
                         InlineKeyboardButton("« Back to Menu", callback_data=PLAYER_BACK),
