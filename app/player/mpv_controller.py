@@ -44,7 +44,7 @@ class MPVController:
         vo: str = "gpu",
         ao: str = "alsa",
         hwdec: str = "auto",
-        fullscreen: bool = False,
+        fullscreen: bool = True,
     ):
         """Initialize the MPV player with configuration.
 
@@ -81,7 +81,7 @@ class MPVController:
             self._player = mpv.MPV(
                 vo=vo,
                 ao=ao,
-                fullscreen=False,  # Don't force fullscreen - display at native size
+                fullscreen=fullscreen,  # Don't force fullscreen - display at native size
                 hwdec=hwdec,
                 input_default_bindings=True,
                 input_vo_keyboard=True,
