@@ -191,11 +191,11 @@ class AudioOutputSelectionScreen(Screen):
             Tuple of (text, keyboard, options)
         """
         try:
-            logger.info("Rendering audio output selection screen")
+            logger.debug("Rendering audio output selection screen")
             sinks = await _get_available_sinks()
-            logger.info(f"Found {len(sinks)} audio sinks")
+            logger.debug(f"Found {len(sinks)} audio sinks")
             current_sink = await _get_current_default_sink()
-            logger.info(f"Current default sink: {current_sink}")
+            logger.debug(f"Current default sink: {current_sink}")
 
             text = "🔊 *Audio Output Selection*\n\n"
 
@@ -215,7 +215,10 @@ class AudioOutputSelectionScreen(Screen):
             else:
                 text += "Current: Unknown\n\n"
 
-            text += "Select audio output:\n"
+            text += "Select audio output:\n\n"
+            
+            # Debug: show what we found
+            logger.info(f"Rendering screen with {len(sinks)} sinks: {[d for _, d in sinks]}")
 
             keyboard = []
             for sink_name, display_name in sinks:
@@ -224,12 +227,22 @@ class AudioOutputSelectionScreen(Screen):
                     button_text = f"✓ {display_name}"
 
                 # Store sink name in callback data
+                # Telegram callback data has a 64-byte limit, so we need to ensure it fits
+                callback_data = f"{AUDIO_OUTPUT_SELECT}{sink_name}"
+                if len(callback_data.encode('utf-8')) > 64:
+                    logger.warning(f"Callback data too long for sink {sink_name}, truncating")
+                    # Use a hash or index instead if name is too long
+                    sink_index = next((i for i, (name, _) in enumerate(sinks) if name == sink_name), 0)
+                    callback_data = f"{AUDIO_OUTPUT_SELECT}index:{sink_index}"
+                
                 keyboard.append(
-                    [InlineKeyboardButton(button_text, callback_data=f"{AUDIO_OUTPUT_SELECT}{sink_name}")]
+                    [InlineKeyboardButton(button_text, callback_data=callback_data)]
                 )
+                logger.debug(f"Added button: {button_text} -> {callback_data[:50]}...")
 
             keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data=AUDIO_OUTPUT_BACK)])
 
+            logger.info(f"Returning screen with {len(keyboard)} buttons")
             return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
         except Exception as e:
@@ -261,14 +274,29 @@ class AudioOutputSelectionScreen(Screen):
                 return Navigation(next_screen="system_control")
 
             elif query.data.startswith(AUDIO_OUTPUT_SELECT):
-                sink_name = query.data[len(AUDIO_OUTPUT_SELECT) :]
-                logger.info(f"Switching to audio sink: {sink_name}")
+                sink_identifier = query.data[len(AUDIO_OUTPUT_SELECT) :]
+                logger.info(f"Switching to audio sink: {sink_identifier}")
 
-                if not sink_name:
-                    logger.warning("No sink name provided in callback")
-                    await query.answer("Error: No sink name provided", show_alert=True)
+                if not sink_identifier:
+                    logger.warning("No sink identifier provided in callback")
+                    await query.answer("Error: No sink identifier provided", show_alert=True)
                     return None
 
+                # Handle both full name and index-based callbacks
+                if sink_identifier.startswith("index:"):
+                    # Get sink by index
+                    sink_index = int(sink_identifier.split(":")[1])
+                    sinks = await _get_available_sinks()
+                    if 0 <= sink_index < len(sinks):
+                        sink_name = sinks[sink_index][0]
+                    else:
+                        await query.answer("Error: Invalid sink index", show_alert=True)
+                        return None
+                else:
+                    # Use the identifier as sink name directly
+                    sink_name = sink_identifier
+
+                logger.info(f"Resolved sink name: {sink_name}")
                 success, message = await _switch_to_sink(sink_name)
 
                 if success:
