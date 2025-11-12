@@ -18,28 +18,133 @@ from app.bot.screens.base import (
 
 logger = logging.getLogger(__name__)
 
-# Audio output options for Raspberry Pi
-AUDIO_OUTPUTS = [
-    ("hdmi", "HDMI", "Audio through HDMI (TV speakers)"),
-    ("analog", "3.5mm Jack", "Audio through 3.5mm headphone jack"),
-    ("auto", "Auto", "Automatic detection"),
-]
 
-
-async def _get_current_audio_output() -> str | None:
-    """Get current audio output setting.
+async def _get_available_sinks() -> list[tuple[str, str]]:
+    """Get list of available audio sinks.
 
     Returns:
-        Current output type ("hdmi", "analog", "auto", or None)
+        List of tuples (sink_name, display_name)
+    """
+    sinks = []
+    try:
+        loop = asyncio.get_event_loop()
+
+        # Run pactl list short sinks
+        result = await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                ["pactl", "list", "short", "sinks"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            ),
+        )
+
+        if result.returncode != 0:
+            logger.warning(f"pactl command failed: {result.stderr}")
+            return sinks
+
+        if not result.stdout:
+            logger.warning("pactl returned no output")
+            return sinks
+
+        # Parse output: index<TAB>name<TAB>description<TAB>state...
+        for line in result.stdout.strip().split("\n"):
+            if not line.strip():
+                continue
+
+            parts = line.split("\t")
+            if len(parts) >= 2:
+                sink_name = parts[1].strip()
+                description = parts[2].strip() if len(parts) > 2 else ""
+
+                # Create display name
+                name_lower = sink_name.lower()
+                desc_lower = description.lower()
+
+                if "hdmi" in name_lower or "hdmi" in desc_lower:
+                    display_name = "HDMI Audio"
+                elif "bcm2835" in name_lower or "analog" in name_lower or "stereo" in name_lower:
+                    display_name = "3.5mm Jack (Analog)"
+                else:
+                    # Use description or last part of name
+                    display_name = description or sink_name.split(".")[-1] if "." in sink_name else sink_name
+
+                sinks.append((sink_name, display_name))
+                logger.debug(f"Found sink: {sink_name} -> {display_name}")
+
+    except FileNotFoundError:
+        logger.error("pactl command not found")
+    except Exception as e:
+        logger.error(f"Error getting audio sinks: {e}", exc_info=True)
+
+    return sinks
+
+
+async def _get_current_default_sink() -> str | None:
+    """Get the name of the current default sink.
+
+    Returns:
+        Sink name or None
     """
     try:
         loop = asyncio.get_event_loop()
 
-        # Check /boot/config.txt for audio settings
         result = await loop.run_in_executor(
             None,
             lambda: subprocess.run(
-                ["grep", "-E", "^dtparam=audio|^dtoverlay.*audio", "/boot/config.txt"],
+                ["pactl", "get-default-sink"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            ),
+        )
+
+        if result.returncode == 0:
+            return result.stdout.strip()
+
+    except Exception as e:
+        logger.debug(f"Error getting default sink: {e}")
+
+    return None
+
+
+async def _switch_to_sink(sink_name: str) -> tuple[bool, str]:
+    """Switch audio output to the specified sink.
+
+    Uses the same logic as prerun.sh (lines 13-25).
+
+    Args:
+        sink_name: Name of the sink to switch to
+
+    Returns:
+        Tuple of (success, message)
+    """
+    try:
+        loop = asyncio.get_event_loop()
+
+        # Set default sink (like prerun.sh line 17)
+        result = await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                ["pactl", "set-default-sink", sink_name],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            ),
+        )
+
+        if result.returncode != 0:
+            return False, f"Failed to set default sink: {result.stderr}"
+
+        # Move all current playback streams to new sink (like prerun.sh lines 20-22)
+        result = await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                ["pactl", "list", "short", "sink-inputs"],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -48,105 +153,24 @@ async def _get_current_audio_output() -> str | None:
         )
 
         if result.returncode == 0 and result.stdout:
-            output = result.stdout.lower()
-            if "dtparam=audio=on" in output or "dtoverlay=vc4-kms-v3d" in output:
-                # Check for explicit HDMI or analog setting
-                if "hdmi" in output and "analog" not in output:
-                    return "hdmi"
-                elif "analog" in output:
-                    return "analog"
+            for line in result.stdout.strip().split("\n"):
+                if line.strip():
+                    input_id = line.split()[0]
+                    await loop.run_in_executor(
+                        None,
+                        lambda inp=input_id: subprocess.run(
+                            ["pactl", "move-sink-input", inp, sink_name],
+                            check=False,
+                            capture_output=True,
+                            text=True,
+                            timeout=1,
+                        ),
+                    )
 
-        # Try to check current ALSA default device
-        result2 = await loop.run_in_executor(
-            None,
-            lambda: subprocess.run(
-                ["aplay", "-l"],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=2,
-            ),
-        )
-
-        if result2.returncode == 0 and result2.stdout:
-            # Look for HDMI or analog devices
-            if "HDMI" in result2.stdout and "card" in result2.stdout:
-                return "hdmi"
-            elif "Headphones" in result2.stdout or "bcm2835" in result2.stdout:
-                return "analog"
-
-        return None
+        return True, "✅ Audio output switched successfully"
 
     except Exception as e:
-        logger.debug(f"Error getting current audio output: {e}")
-        return None
-
-
-async def _set_audio_output(output_type: str) -> tuple[bool, str]:
-    """Set audio output.
-
-    Args:
-        output_type: Output type ("hdmi", "analog", or "auto")
-
-    Returns:
-        Tuple of (success, message)
-    """
-    try:
-        # For Raspberry Pi, audio output is controlled via /boot/config.txt
-        # This requires sudo and is risky, so we'll provide instructions
-
-        config_lines_map = {
-            "hdmi": (
-                "# For HDMI audio output, add or modify:\n"
-                "dtparam=audio=on\n"
-                "# Or use:\n"
-                "dtoverlay=vc4-kms-v3d\n"
-                "# HDMI audio is usually enabled by default"
-            ),
-            "analog": (
-                "# For 3.5mm jack audio output, add:\n"
-                "dtparam=audio=on\n"
-                "# And ensure HDMI audio is disabled or set:\n"
-                "# dtparam=audio=off  # if you want to disable HDMI audio"
-            ),
-            "auto": (
-                "# For automatic audio detection:\n"
-                "dtparam=audio=on\n"
-                "# System will detect available audio outputs"
-            ),
-        }
-
-        config_lines = config_lines_map.get(
-            output_type,
-            "# Add appropriate audio configuration",
-        )
-
-        message = (
-            f"To set audio output to {output_type.upper()}, edit `/boot/config.txt` and add/modify:\n\n"
-            f"```\n{config_lines}\n```\n\n"
-            "Then reboot the system.\n\n"
-            "**Alternative method (without reboot):**\n"
-            "You can also use `raspi-config`:\n"
-            "```bash\n"
-            "sudo raspi-config\n"
-            "# Navigate to: Advanced Options > Audio\n"
-            "# Select your preferred output\n"
-            "```\n\n"
-            "**Quick test (temporary, until reboot):**\n"
-            "```bash\n"
-            "# For HDMI:\n"
-            "amixer cset numid=3 2\n"
-            "# For 3.5mm jack:\n"
-            "amixer cset numid=3 1\n"
-            "# For auto:\n"
-            "amixer cset numid=3 0\n"
-            "```"
-        )
-
-        return False, message
-
-    except Exception as e:
-        logger.error(f"Error setting audio output: {e}")
+        logger.error(f"Error switching audio sink: {e}", exc_info=True)
         return False, f"Error: {str(e)}"
 
 
@@ -166,36 +190,67 @@ class AudioOutputSelectionScreen(Screen):
         Returns:
             Tuple of (text, keyboard, options)
         """
-        current_output = await _get_current_audio_output()
+        try:
+            logger.debug("Rendering audio output selection screen")
+            sinks = await _get_available_sinks()
+            logger.debug(f"Found {len(sinks)} audio sinks")
+            current_sink = await _get_current_default_sink()
+            logger.debug(f"Current default sink: {current_sink}")
 
-        text = "🔊 *Audio Output Selection*\n\n"
-        if current_output:
-            # Find the label for current output
-            current_label = next(
-                (label for key, label, _ in AUDIO_OUTPUTS if key == current_output),
-                current_output.upper(),
-            )
-            text += f"Current output: *{current_label}*\n\n"
-        else:
-            text += "Current output: Unknown\n\n"
+            text = "🔊 *Audio Output Selection*\n\n"
 
-        text += "Select audio output destination:\n\n"
-        text += "⚠️ *Note*: Changing audio output requires editing `/boot/config.txt` and rebooting.\n"
-        text += "The bot will provide instructions after selection.\n\n"
-        text += "You can also use the temporary method (until reboot) shown in the instructions."
+            if not sinks:
+                text += "⚠️ No audio sinks found.\n\n"
+                text += "Make sure PulseAudio or PipeWire is running."
+                keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data=AUDIO_OUTPUT_BACK)]]
+                return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
-        keyboard = []
-        for key, label, description in AUDIO_OUTPUTS:
-            button_text = f"{label}"
-            if current_output == key:
-                button_text = f"✓ {label}"
-            keyboard.append(
-                [InlineKeyboardButton(button_text, callback_data=f"{AUDIO_OUTPUT_SELECT}{key}")]
-            )
+            if current_sink:
+                # Find current sink in the list
+                current_display = next((display for name, display in sinks if name == current_sink), None)
+                if current_display:
+                    text += f"Current: *{current_display}*\n\n"
+                else:
+                    text += f"Current: *{current_sink}*\n\n"
+            else:
+                text += "Current: Unknown\n\n"
 
-        keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data=AUDIO_OUTPUT_BACK)])
+            text += "Select audio output:\n\n"
+            
+            # Debug: show what we found
+            logger.info(f"Rendering screen with {len(sinks)} sinks: {[d for _, d in sinks]}")
 
-        return text, InlineKeyboardMarkup(keyboard), RenderOptions()
+            keyboard = []
+            for sink_name, display_name in sinks:
+                button_text = display_name
+                if current_sink and sink_name == current_sink:
+                    button_text = f"✓ {display_name}"
+
+                # Store sink name in callback data
+                # Telegram callback data has a 64-byte limit, so we need to ensure it fits
+                callback_data = f"{AUDIO_OUTPUT_SELECT}{sink_name}"
+                if len(callback_data.encode('utf-8')) > 64:
+                    logger.warning(f"Callback data too long for sink {sink_name}, truncating")
+                    # Use a hash or index instead if name is too long
+                    sink_index = next((i for i, (name, _) in enumerate(sinks) if name == sink_name), 0)
+                    callback_data = f"{AUDIO_OUTPUT_SELECT}index:{sink_index}"
+                
+                keyboard.append(
+                    [InlineKeyboardButton(button_text, callback_data=callback_data)]
+                )
+                logger.debug(f"Added button: {button_text} -> {callback_data[:50]}...")
+
+            keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data=AUDIO_OUTPUT_BACK)])
+
+            logger.info(f"Returning screen with {len(keyboard)} buttons")
+            return text, InlineKeyboardMarkup(keyboard), RenderOptions()
+
+        except Exception as e:
+            logger.error(f"Error in render: {e}", exc_info=True)
+            text = "🔊 *Audio Output Selection*\n\n"
+            text += f"❌ Error: {str(e)}"
+            keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data=AUDIO_OUTPUT_BACK)]]
+            return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
     async def handle_callback(
         self,
@@ -211,20 +266,56 @@ class AudioOutputSelectionScreen(Screen):
         Returns:
             Navigation or None
         """
-        if query.data == AUDIO_OUTPUT_BACK:
-            return Navigation(next_screen="system_control")
+        try:
+            logger.info(f"Audio output callback received: {query.data}")
+            
+            if query.data == AUDIO_OUTPUT_BACK:
+                logger.info("Navigating back to system_control")
+                return Navigation(next_screen="system_control")
 
-        elif query.data.startswith(AUDIO_OUTPUT_SELECT):
-            output_type = query.data[len(AUDIO_OUTPUT_SELECT) :]
-            success, message = await _set_audio_output(output_type)
+            elif query.data.startswith(AUDIO_OUTPUT_SELECT):
+                sink_identifier = query.data[len(AUDIO_OUTPUT_SELECT) :]
+                logger.info(f"Switching to audio sink: {sink_identifier}")
 
-            if success:
-                await query.answer(f"Audio output set to {output_type}")
-            else:
-                await query.answer(message, show_alert=True)
+                if not sink_identifier:
+                    logger.warning("No sink identifier provided in callback")
+                    await query.answer("Error: No sink identifier provided", show_alert=True)
+                    return None
 
-            # Return to system control after showing message
-            return Navigation(next_screen="system_control")
+                # Handle both full name and index-based callbacks
+                if sink_identifier.startswith("index:"):
+                    # Get sink by index
+                    sink_index = int(sink_identifier.split(":")[1])
+                    sinks = await _get_available_sinks()
+                    if 0 <= sink_index < len(sinks):
+                        sink_name = sinks[sink_index][0]
+                    else:
+                        await query.answer("Error: Invalid sink index", show_alert=True)
+                        return None
+                else:
+                    # Use the identifier as sink name directly
+                    sink_name = sink_identifier
 
-        return None
+                logger.info(f"Resolved sink name: {sink_name}")
+                success, message = await _switch_to_sink(sink_name)
 
+                if success:
+                    # Find display name for the message
+                    sinks = await _get_available_sinks()
+                    display_name = next((display for name, display in sinks if name == sink_name), sink_name)
+                    await query.answer(f"✅ Switched to {display_name}")
+                    logger.info(f"Successfully switched to {display_name}")
+                else:
+                    logger.error(f"Failed to switch sink: {message}")
+                    await query.answer(message, show_alert=True)
+
+                # Stay on the same screen to show updated state
+                return None
+
+            logger.warning(f"Unknown callback data: {query.data}")
+            return None
+
+        except Exception as e:
+            logger.error(f"Error in handle_callback: {e}", exc_info=True)
+            await query.answer(f"Error: {str(e)}", show_alert=True)
+            return None
