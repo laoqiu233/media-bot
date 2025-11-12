@@ -50,6 +50,7 @@ async def _get_connected_display() -> tuple[str | None, str | None]:
     """
     try:
         loop = asyncio.get_event_loop()
+        logger.debug("Running xrandr to get connected display")
         result = await loop.run_in_executor(
             None,
             lambda: subprocess.run(
@@ -62,8 +63,10 @@ async def _get_connected_display() -> tuple[str | None, str | None]:
         )
 
         if result.returncode != 0:
-            logger.warning(f"xrandr failed: {result.stderr}")
+            logger.warning(f"xrandr failed with return code {result.returncode}: {result.stderr}")
             return None, None
+
+        logger.debug(f"xrandr output:\n{result.stdout}")
 
         current_output = None
         current_resolution = None
@@ -78,6 +81,7 @@ async def _get_connected_display() -> tuple[str | None, str | None]:
                     # Check if it's connected (not disconnected)
                     if "disconnected" not in line.lower():
                         current_output = output_name
+                        logger.debug(f"Found connected output: {output_name}")
 
                         # Find current resolution in the line
                         # Format: "HDMI-1 connected primary 1920x1080+0+0 ..."
@@ -88,16 +92,18 @@ async def _get_connected_display() -> tuple[str | None, str | None]:
                                 res_part = part.split("+")[0]
                                 if re.match(r"\d+x\d+", res_part):
                                     current_resolution = res_part
+                                    logger.debug(f"Found current resolution: {current_resolution}")
                                     break
 
                         break
 
+        logger.info(f"Connected display: {current_output}, Current resolution: {current_resolution}")
         return current_output, current_resolution
 
     except FileNotFoundError:
         logger.warning("xrandr utility not found. Install with: sudo apt install x11-xserver-utils")
     except Exception as e:
-        logger.error(f"Error getting connected display: {e}")
+        logger.error(f"Error getting connected display: {e}", exc_info=True)
         return None, None
 
 
@@ -113,6 +119,7 @@ async def _get_available_resolutions(output_name: str) -> list[DisplayMode]:
     modes = []
     try:
         loop = asyncio.get_event_loop()
+        logger.debug(f"Getting available resolutions for output: {output_name}")
         result = await loop.run_in_executor(
             None,
             lambda: subprocess.run(
@@ -125,6 +132,7 @@ async def _get_available_resolutions(output_name: str) -> list[DisplayMode]:
         )
 
         if result.returncode != 0:
+            logger.warning(f"xrandr failed with return code {result.returncode}")
             return modes
 
         # Parse xrandr output to find modes for the specified output
@@ -135,6 +143,7 @@ async def _get_available_resolutions(output_name: str) -> list[DisplayMode]:
             # Check if we're in the section for this output
             if line.startswith(output_name):
                 in_output_section = True
+                logger.debug(f"Found output section: {line}")
                 # Extract current resolution from the output line
                 # Format: "HDMI-1 connected primary 1920x1080+0+0 ..."
                 parts = line.split()
@@ -143,11 +152,13 @@ async def _get_available_resolutions(output_name: str) -> list[DisplayMode]:
                         res_part = part.split("+")[0]
                         if re.match(r"\d+x\d+", res_part):
                             current_resolution = res_part
+                            logger.debug(f"Current resolution from output line: {current_resolution}")
                             break
                 continue
 
             # If we hit another output, stop parsing
             if in_output_section and re.match(r"^\w+-\d+", line):
+                logger.debug(f"Hit another output, stopping: {line}")
                 break
 
             # Parse mode lines (indented with spaces)
@@ -156,6 +167,7 @@ async def _get_available_resolutions(output_name: str) -> list[DisplayMode]:
                 # or:     "   1920x1080     60.00 +"
                 # or:     "   1920x1080     60.00"
                 line = line.strip()
+                logger.debug(f"Parsing mode line: {line}")
                 parts = re.split(r"\s+", line)
 
                 if len(parts) >= 1:
@@ -176,13 +188,15 @@ async def _get_available_resolutions(output_name: str) -> list[DisplayMode]:
                         if resolution == current_resolution:
                             is_current = True
 
+                        logger.debug(f"Found mode: {resolution}, refresh: {refresh_rate}, current: {is_current}")
                         modes.append(DisplayMode(resolution, refresh_rate, is_current))
 
         # Sort modes: current first, then by resolution (largest first)
         modes.sort(key=lambda m: (not m.current, -int(m.resolution.split("x")[0])), reverse=False)
+        logger.info(f"Found {len(modes)} available resolutions for {output_name}")
 
     except Exception as e:
-        logger.error(f"Error getting available resolutions: {e}")
+        logger.error(f"Error getting available resolutions: {e}", exc_info=True)
 
     return modes
 
@@ -200,12 +214,17 @@ async def _set_resolution(output_name: str, resolution: str) -> tuple[bool, str]
     try:
         loop = asyncio.get_event_loop()
 
+        logger.info(f"Setting resolution to {resolution} for output {output_name}")
+
         # Use xrandr to set the resolution
         # Format: xrandr --output <output> --mode <resolution>
+        cmd = ["xrandr", "--output", output_name, "--mode", resolution]
+        logger.debug(f"Running command: {' '.join(cmd)}")
+
         result = await loop.run_in_executor(
             None,
             lambda: subprocess.run(
-                ["xrandr", "--output", output_name, "--mode", resolution],
+                cmd,
                 check=False,
                 capture_output=True,
                 text=True,
@@ -213,10 +232,18 @@ async def _set_resolution(output_name: str, resolution: str) -> tuple[bool, str]
             ),
         )
 
+        logger.debug(f"xrandr return code: {result.returncode}")
+        if result.stdout:
+            logger.debug(f"xrandr stdout: {result.stdout}")
+        if result.stderr:
+            logger.debug(f"xrandr stderr: {result.stderr}")
+
         if result.returncode == 0:
+            logger.info(f"Successfully set resolution to {resolution} for {output_name}")
             return True, f"Resolution changed to {resolution}"
         else:
             error_msg = result.stderr or result.stdout or "Unknown error"
+            logger.error(f"Failed to set resolution: {error_msg.strip()}")
             return False, f"Failed to set resolution: {error_msg.strip()}"
 
     except Exception as e:
@@ -308,20 +335,26 @@ class ResolutionSelectionScreen(Screen):
         elif query.data.startswith(RESOLUTION_SELECT):
             # Format: "resolution:select:HDMI-1:1920x1080"
             data = query.data[len(RESOLUTION_SELECT) :]
+            logger.debug(f"Resolution selection callback data: {data}")
             parts = data.split(":")
+            logger.debug(f"Split parts: {parts}")
             if len(parts) >= 2:
                 output_name = parts[0]
                 resolution = parts[1]
+                logger.info(f"Attempting to set resolution: {resolution} for output: {output_name}")
                 success, message = await _set_resolution(output_name, resolution)
 
                 if success:
+                    logger.info(f"Resolution change successful: {message}")
                     await query.answer(f"Resolution set to {resolution}")
                 else:
+                    logger.error(f"Resolution change failed: {message}")
                     await query.answer(message, show_alert=True)
 
                 # Return to system control after showing message
                 return Navigation(next_screen="system_control")
             else:
+                logger.warning(f"Invalid resolution data format: {data} (expected 'output:resolution')")
                 await query.answer("Invalid resolution data", show_alert=True)
 
         return None
