@@ -6,6 +6,7 @@ from app.bot.screens import (
     PlayerScreen,
     Screen,
     SearchScreen,
+    SetupConfirmationScreen,
     StatusScreen,
     TorrentProvidersScreen,
     TorrentResultsScreen,
@@ -39,6 +40,7 @@ class ScreenRegistry:
         self.player_screen = PlayerScreen(mpv_controller)
         self.status_screen = StatusScreen(mpv_controller, cec_controller, torrent_downloader, library_manager)
         self.tv_screen = TVScreen(cec_controller)
+        self.setup_confirmation_screen = SetupConfirmationScreen()
         self.screens = [
             self.main_menu,
             self.search_screen,
@@ -50,6 +52,7 @@ class ScreenRegistry:
             self.player_screen,
             self.status_screen,
             self.tv_screen,
+            self.setup_confirmation_screen,
         ]
         self.screens_by_name = {screen.get_name(): screen for screen in self.screens}
 

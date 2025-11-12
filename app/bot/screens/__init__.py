@@ -7,6 +7,7 @@ from app.bot.screens.main_menu import MainMenuScreen
 from app.bot.screens.movie_selection import MovieSelectionScreen
 from app.bot.screens.player import PlayerScreen
 from app.bot.screens.search import SearchScreen
+from app.bot.screens.setup_confirmation import SetupConfirmationScreen
 from app.bot.screens.status import StatusScreen
 from app.bot.screens.torrent_providers import TorrentProvidersScreen
 from app.bot.screens.torrent_results import TorrentResultsScreen
@@ -20,6 +21,7 @@ __all__ = [
     "MovieSelectionScreen",
     "PlayerScreen",
     "SearchScreen",
+    "SetupConfirmationScreen",
     "StatusScreen",
     "TorrentProvidersScreen",
     "TorrentResultsScreen",

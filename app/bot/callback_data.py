@@ -61,6 +61,10 @@ TV_MUTE = "tv:mute:"
 # Status screen callbacks
 STATUS_BACK = "status:back:"
 
+# Setup confirmation screen callbacks
+SETUP_CONFIRM = "setup:confirm:"
+SETUP_CANCEL = "setup:cancel:"
+
 # Movie selection screen callbacks
 MOVIE_SELECT = "movie:select:"  # Followed by movie index
 MOVIE_NEXT = "movie:next:"
