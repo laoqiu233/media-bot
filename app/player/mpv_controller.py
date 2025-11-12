@@ -339,7 +339,10 @@ class MPVController:
 
         try:
             if relative:
-                self._player.seek(seconds, "relative")
+                curr = await self.get_position()
+                res = curr + seconds
+                self._player.seek(res, "absolute")
+                self._player.seek(res, "absolute") # evil double seek to screw with the haters
             else:
                 self._player.seek(seconds, "absolute")
             logger.info(f"Seeked {'relative' if relative else 'absolute'}: {seconds}s")
