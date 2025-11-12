@@ -341,6 +341,16 @@ class MPVController:
             self._player.stop()
             self._is_playing = False
             self._current_file = None
+            
+            # Resume all downloads when playback is stopped manually
+            if self._downloader is not None:
+                try:
+                    resumed_count = await self._downloader.resume_all_downloads()
+                    if resumed_count > 0:
+                        logger.info(f"Resumed {resumed_count} downloads after stop command")
+                except Exception as e:
+                    logger.error(f"Error resuming downloads after stop: {e}")
+            
             logger.info("Playback stopped")
             return True
         except Exception as e:
