@@ -27,7 +27,7 @@ class CECController:
         self._current_command: Optional[str] = None  # Track current running command
         self._status_cache: Optional[dict] = None  # Cached status
         self._status_cache_time: float = 0.0  # Timestamp of cached status
-        self._status_cache_ttl: float = 60.0  # Cache TTL in seconds (60 seconds)
+        self._status_cache_ttl: float = 10.0  # Cache TTL in seconds (10 seconds for faster power status updates)
 
     async def check_availability(self) -> bool:
         """Check if CEC is available on the system.
@@ -126,6 +126,11 @@ class CECController:
         """
         return self._current_command
 
+    def _invalidate_cache(self):
+        """Invalidate the status cache to force fresh status on next query."""
+        self._status_cache = None
+        self._status_cache_time = 0.0
+
     async def tv_on(self) -> bool:
         """Turn the TV on.
 
@@ -134,6 +139,9 @@ class CECController:
         """
         logger.info("Turning TV on via CEC")
         success, output = await self._send_cec_command(["--to", "0", "--image-view-on"])
+        # Invalidate cache so status refreshes immediately
+        if success:
+            self._invalidate_cache()
         return success
 
     async def tv_off(self) -> bool:
@@ -144,6 +152,9 @@ class CECController:
         """
         logger.info("Turning TV off via CEC")
         success, output = await self._send_cec_command(["--to", "0", "--standby"])
+        # Invalidate cache so status refreshes immediately
+        if success:
+            self._invalidate_cache()
         return success
 
     async def set_active_source(self) -> bool:
@@ -207,17 +218,56 @@ class CECController:
                     logger.debug("Power status query timeout")
                     return None
 
+                # Check if command succeeded
+                if process.returncode != 0:
+                    error = stderr.decode() if stderr else "Unknown error"
+                    logger.debug(f"Power status query failed with return code {process.returncode}: {error}")
+                    self._current_command = None
+                    return None
+
                 # Combine stdout and stderr (cec-ctl may output to either)
                 output = (stdout.decode() if stdout else "") + (stderr.decode() if stderr else "")
                 self._current_command = None
 
-                # Check if output contains "pwr-state: on"
-                if "pwr-state: on" in output.lower():
-                    logger.debug("TV power status: on")
-                    return "on"
-                elif output.strip():  # If we got any response, assume standby
-                    logger.debug("TV power status: standby")
-                    return "standby"
+                # Log the raw output for debugging
+                logger.debug(f"Power status query output: {repr(output)}")
+
+                # Check output for power state patterns using regex for exact matching
+                output_lower = output.lower().strip()
+                
+                # Use regex to find "pwr-state: on" pattern (very strict matching)
+                # Match "pwr-state:" (with optional dash variations) followed by optional whitespace and "on" as a whole word
+                # Also handle variations like "power-state" or "pwr state"
+                on_patterns = [
+                    r"pwr-state:\s*on\b",  # Standard format
+                    r"power-state:\s*on\b",  # Alternative format
+                    r"pwr\s+state:\s*on\b",  # Space instead of dash
+                ]
+                
+                standby_patterns = [
+                    r"pwr-state:\s*(standby|off)\b",  # Standard format
+                    r"power-state:\s*(standby|off)\b",  # Alternative format
+                    r"pwr\s+state:\s*(standby|off)\b",  # Space instead of dash
+                ]
+                
+                # Check for "on" status first
+                for pattern in on_patterns:
+                    match = re.search(pattern, output_lower)
+                    if match:
+                        logger.debug(f"TV power status: on (found pattern: {pattern})")
+                        return "on"
+                
+                # Check for "standby" or "off" status
+                for pattern in standby_patterns:
+                    match = re.search(pattern, output_lower)
+                    if match:
+                        logger.debug(f"TV power status: standby (found pattern: {pattern})")
+                        return "standby"
+                
+                # If we got a response but no clear power state, return None
+                if output_lower:
+                    logger.warning(f"Power status query returned unexpected output: {repr(output)}")
+                    return None
                 else:
                     logger.debug("No response from power status query")
                     return None
