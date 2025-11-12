@@ -61,9 +61,9 @@ class TVScreen(Screen):
                     text += f"Device: {cec_status['tv_name']}\n"
                 
                 # Show current running command if any
-                current_cmd = cec_status.get("current_command")
-                if current_cmd:
-                    text += f"\n⏳ Running: `{current_cmd}`\n"
+                # current_cmd = cec_status.get("current_command")
+                # if current_cmd:
+                #     text += f"\n⏳ Running: `{current_cmd}`\n"
 
                 text += "\nUse the buttons below to control your TV:"
 
