@@ -1,28 +1,39 @@
 #!/bin/bash
-# Pre-run script to set system volume to 100%
+# Pre-run script to set system volume and switch output to HDMI
 
-set -e  # Exit on error
+set -e
 
-echo "Setting system volume to 100%..."
+echo "=== Pre-run audio setup ==="
 
-# Try PulseAudio first (common on modern Ubuntu systems)
-if command -v pactl &> /dev/null; then
-    echo "Using PulseAudio to set volume..."
-    pactl set-sink-volume @DEFAULT_SINK@ 100% || {
-        # Try with sink index 0 if @DEFAULT_SINK@ doesn't work
-        pactl set-sink-volume 0 100% || echo "Warning: Failed to set PulseAudio volume"
-    }
+# Try PulseAudio / PipeWire first
+if command -v pactl &>/dev/null; then
+    echo "Using PulseAudio / PipeWire..."
+
+    # Find HDMI sink
+    HDMI_SINK=$(pactl list short sinks | grep -i hdmi | awk '{print $2}' | head -n1)
+
+    if [ -n "$HDMI_SINK" ]; then
+        echo "Switching default sink to HDMI: $HDMI_SINK"
+        pactl set-default-sink "$HDMI_SINK"
+
+        # Move all current playback streams to HDMI
+        for INPUT in $(pactl list short sink-inputs | awk '{print $1}'); do
+            pactl move-sink-input "$INPUT" "$HDMI_SINK"
+        done
+    else
+        echo "Warning: No HDMI sink found. Keeping default output."
+    fi
+
+    echo "Setting volume to 100%..."
+    pactl set-sink-volume @DEFAULT_SINK@ 100% || pactl set-sink-volume 0 100%
 fi
 
-# Try ALSA as fallback (common on Raspberry Pi)
-if command -v amixer &> /dev/null; then
-    echo "Using ALSA to set volume..."
-    # Try different ALSA cards (0 is usually the default)
+# ALSA fallback (for older systems)
+if command -v amixer &>/dev/null; then
+    echo "Using ALSA fallback..."
     amixer -c 0 set Master 100% unmute 2>/dev/null || \
     amixer set Master 100% unmute 2>/dev/null || \
-    amixer -D pulse set Master 100% unmute 2>/dev/null || \
     echo "Warning: Failed to set ALSA volume"
 fi
 
-echo "Volume setup complete."
-
+echo "=== Audio setup complete ==="
