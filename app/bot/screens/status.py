@@ -46,24 +46,51 @@ class StatusScreen(Screen):
             # Player status
             status_text += "🎮 *Player:*\n"
             if player_status["is_playing"]:
-                filename = Path(player_status["current_file"]).name
+                filename = Path(player_status["current_file"]).name if player_status.get("current_file") else "Unknown"
                 status_text += f"▶️ Playing: {filename}\n"
             else:
                 status_text += "⏹ Idle\n"
+            
+            # Player volume
+            volume = player_status.get("volume")
+            if volume is not None:
+                status_text += f"🔊 Volume: {volume}%\n"
 
             # CEC status
             status_text += "\n📺 *TV (CEC):*\n"
-            if cec_status["available"]:
-                power = cec_status.get("power_status", "unknown")
-                status_text += f"Power: {power}\n"
-                if cec_status.get("tv_name"):
-                    status_text += f"Device: {cec_status['tv_name']}\n"
+            if cec_status.get("available"):
+                power = cec_status.get("power_status")
+                if power:
+                    power_emoji = "🟢" if power == "on" else "🔴"
+                    status_text += f"Power: {power_emoji} {power.capitalize()}\n"
+                else:
+                    status_text += "Power: Unknown\n"
+                
+                tv_name = cec_status.get("tv_name")
+                if tv_name:
+                    status_text += f"Device: {tv_name}\n"
+                
+                # TV volume - CEC doesn't support querying volume, so show N/A
+                status_text += "Volume: N/A (CEC doesn't support query)\n"
             else:
-                status_text += "Not available\n"
+                error = cec_status.get("error", "Not available")
+                status_text += f"❌ {error}\n"
 
             # Download status
-            active_downloads = [t for t in tasks if t.status == "downloading"]
-            status_text += f"\n📥 *Downloads:* {len(active_downloads)} active\n"
+            # Count active downloads (downloading, checking, or queued but not completed)
+            active_statuses = ["downloading", "checking", "queued"]
+            active_downloads = [t for t in tasks if t.status in active_statuses]
+            completed_downloads = [t for t in tasks if t.status == "completed"]
+            paused_downloads = [t for t in tasks if t.status == "paused"]
+            
+            status_text += f"\n📥 *Downloads:*\n"
+            status_text += f"Active: {len(active_downloads)}\n"
+            if paused_downloads:
+                status_text += f"Paused: {len(paused_downloads)}\n"
+            if completed_downloads:
+                status_text += f"Completed: {len(completed_downloads)}\n"
+            if not tasks:
+                status_text += "No downloads\n"
 
             keyboard = [
                 [InlineKeyboardButton("⬅️ Back", callback_data=STATUS_BACK)],
