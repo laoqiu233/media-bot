@@ -970,9 +970,8 @@ async def ensure_telegram_token(force: bool = False) -> None:
                             print("[init] Showing loading.gif after QR code screen closed")
                         except Exception as e:
                             print(f"[init] Could not show loading.gif: {e}")
-                        await asyncio.sleep(1.5)
+                        await asyncio.sleep(3)
                     mpv_proc.terminate()
-                    await asyncio.sleep(1.5)
                     try:
                         await asyncio.wait_for(
                             asyncio.to_thread(mpv_proc.wait), timeout=1.0
