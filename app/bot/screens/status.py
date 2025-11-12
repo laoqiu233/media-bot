@@ -14,6 +14,7 @@ from app.bot.screens.base import (
     ScreenHandlerResult,
     ScreenRenderResult,
 )
+from app.library.manager import LibraryManager
 from app.player.mpv_controller import MPVController
 from app.torrent.downloader import TorrentDownloader
 from app.tv.hdmi_cec import CECController
@@ -27,10 +28,12 @@ class StatusScreen(Screen):
         mpv_controller: MPVController,
         cec_controller: CECController,
         torrent_downloader: TorrentDownloader,
+        library_manager: LibraryManager,
     ):
         self.mpv_controller = mpv_controller
         self.cec_controller = cec_controller
         self.torrent_downloader = torrent_downloader
+        self.library_manager = library_manager
 
     def get_name(self) -> str:
         return "status"
@@ -65,13 +68,6 @@ class StatusScreen(Screen):
                     status_text += f"Power: {power_emoji} {power.capitalize()}\n"
                 else:
                     status_text += "Power: Unknown\n"
-                
-                tv_name = cec_status.get("tv_name")
-                if tv_name:
-                    status_text += f"Device: {tv_name}\n"
-                
-                # TV volume - CEC doesn't support querying volume, so show N/A
-                status_text += "Volume: N/A (CEC doesn't support query)\n"
             else:
                 error = cec_status.get("error", "Not available")
                 status_text += f"❌ {error}\n"
@@ -83,6 +79,10 @@ class StatusScreen(Screen):
             completed_downloads = [t for t in tasks if t.status == "completed"]
             paused_downloads = [t for t in tasks if t.status == "paused"]
             
+            # Get library count
+            movies = await self.library_manager.get_all_movies()
+            movies_count = len(movies)
+            
             status_text += f"\n📥 *Downloads:*\n"
             status_text += f"Active: {len(active_downloads)}\n"
             if paused_downloads:
@@ -91,6 +91,7 @@ class StatusScreen(Screen):
                 status_text += f"Completed: {len(completed_downloads)}\n"
             if not tasks:
                 status_text += "No downloads\n"
+            status_text += f"Films in library: {movies_count}\n"
 
             keyboard = [
                 [InlineKeyboardButton("⬅️ Back", callback_data=STATUS_BACK)],

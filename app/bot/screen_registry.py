@@ -37,7 +37,7 @@ class ScreenRegistry:
         self.library_screen = LibraryScreen(library_manager, mpv_controller)
         self.downloads_screen = DownloadsScreen(torrent_downloader)
         self.player_screen = PlayerScreen(mpv_controller)
-        self.status_screen = StatusScreen(mpv_controller, cec_controller, torrent_downloader)
+        self.status_screen = StatusScreen(mpv_controller, cec_controller, torrent_downloader, library_manager)
         self.tv_screen = TVScreen(cec_controller)
         self.screens = [
             self.main_menu,
