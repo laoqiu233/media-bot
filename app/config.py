@@ -56,7 +56,7 @@ class MPVConfig(BaseModel):
 
     vo: str = Field(default="gpu", description="Video output driver")
     ao: str = Field(default="alsa", description="Audio output driver")
-    fullscreen: bool = Field(default=True, description="Start in fullscreen mode")
+    fullscreen: bool = Field(default=False, description="Start in fullscreen mode (False = native size)")
     hwdec: str = Field(default="auto", description="Hardware decoding")
 
 

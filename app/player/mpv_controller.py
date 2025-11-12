@@ -42,7 +42,6 @@ class MPVController:
         self,
         vo: str = "gpu",
         ao: str = "alsa",
-        fullscreen: bool = True,
         hwdec: str = "auto",
     ):
         """Initialize the MPV player with configuration.
@@ -80,15 +79,16 @@ class MPVController:
             self._player = mpv.MPV(
                 vo=vo,
                 ao=ao,
-                fullscreen=fullscreen,
+                fullscreen=False,  # Don't force fullscreen - display at native size
                 hwdec=hwdec,
                 input_default_bindings=True,
                 input_vo_keyboard=True,
                 osc=True,  # On-screen controller
-                border=True,  # Remove border
+                border=False,  # Remove border
                 window_dragging=False,  # Disable window dragging
                 keepaspect=True,  # Maintain aspect ratio (native size)
                 panscan=0.0,  # No pan/scan (native size)
+                video_unscaled="no",  # Allow scaling but maintain aspect
             )
 
             # Register event handlers
@@ -305,13 +305,12 @@ class MPVController:
 
         try:
             await self._show_loading_gif()
-            await asyncio.sleep(1.5)
-
+            await asyncio.sleep(3)
+            logger.info("Gif started")
             self._player.stop()
             self._is_playing = False
             self._current_file = None
             logger.info("Playback stopped")
-            # Wait 1.5 seconds for video to fully stop and disappear before showing loading.gif
             return True
         except Exception as e:
             logger.error(f"Error stopping playback: {e}")
