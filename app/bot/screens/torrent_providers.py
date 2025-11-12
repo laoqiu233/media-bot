@@ -1,6 +1,8 @@
 """Torrent provider selection screen."""
 
+import asyncio
 import logging
+import os
 
 from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -13,6 +15,7 @@ from app.bot.screens.base import (
     ScreenHandlerResult,
     ScreenRenderResult,
 )
+from app.init_flow import ensure_rutracker_credentials
 from app.library.models import IMDbMovie
 
 logger = logging.getLogger(__name__)
@@ -114,6 +117,52 @@ class TorrentProvidersScreen(Screen):
             movie: IMDbMovie = state.get("selected_movie")
 
             if movie:
+                # Check if RuTracker credentials are needed
+                if provider == "rutracker":
+                    tracker_username = os.getenv("TRACKER_USERNAME")
+                    tracker_password = os.getenv("TRACKER_PASSWORD")
+                    
+                    if not tracker_username or not tracker_password:
+                        # Credentials missing - start setup flow
+                        await query.answer("RuTracker credentials required", show_alert=True)
+                        
+                        # Start setup in background
+                        async def setup_task():
+                            try:
+                                # Detect IP for the URL
+                                import socket
+                                try:
+                                    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                                        s.connect(("8.8.8.8", 80))
+                                        host_ip = s.getsockname()[0]
+                                except Exception:
+                                    host_ip = "127.0.0.1"
+                                
+                                setup_url = f"http://{host_ip}:8766/"
+                                
+                                # Send message with setup URL
+                                await query.message.reply_text(
+                                    f"🏴‍☠️ *RuTracker Authorization Required*\n\n"
+                                    f"Please open this URL in your browser to enter your RuTracker credentials:\n\n"
+                                    f"`{setup_url}`\n\n"
+                                    f"After submitting your credentials, try selecting RuTracker again.",
+                                    parse_mode="Markdown"
+                                )
+                                
+                                # Run the setup flow (this will start the web server)
+                                await ensure_rutracker_credentials()
+                            except Exception as e:
+                                logger.error(f"Error setting up RuTracker credentials: {e}")
+                                await query.message.reply_text(
+                                    f"❌ Error starting RuTracker setup: {str(e)}"
+                                )
+                        
+                        # Start setup in background
+                        asyncio.create_task(setup_task())
+                        
+                        # Stay on current screen
+                        return None
+                
                 await query.answer(f"Searching {provider.upper()}...", show_alert=False)
 
                 # Navigate to torrent results with movie, provider, and context for back navigation

@@ -162,7 +162,17 @@ class TorrentSearcher:
     async def _search_tracker(self, query: str, limit: int) -> list[TorrentSearchResult]:
         results = []
         try:
-            async with AsyncRuTrackerClient(self.config.tracker.username, self.config.tracker.password, self.config.tracker.proxy) as client:
+            # Check environment variables directly in case credentials were updated
+            import os
+            username = self.config.tracker.username or os.getenv("TRACKER_USERNAME")
+            password = self.config.tracker.password or os.getenv("TRACKER_PASSWORD")
+            proxy = self.config.tracker.proxy or os.getenv("TRACKER_PROXY")
+            
+            if not username or not password:
+                logger.error("RuTracker credentials not configured. Please set TRACKER_USERNAME and TRACKER_PASSWORD.")
+                return results
+            
+            async with AsyncRuTrackerClient(username, password, proxy) as client:
                 raw_results = await client.search_all_pages(query)
                 
                 for result in raw_results:

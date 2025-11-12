@@ -172,7 +172,17 @@ class TorrentDownloader:
                 try:
                     file_name = f"{torrent_file_link[-7:]}.torrent"
                     file_path = self.download_path.joinpath('torrents', file_name)
-                    async with AsyncRuTrackerClient(self.config.tracker.username, self.config.tracker.password, self.config.tracker.proxy) as client:
+                    # Check environment variables directly in case credentials were updated
+                    import os
+                    username = self.config.tracker.username or os.getenv("TRACKER_USERNAME")
+                    password = self.config.tracker.password or os.getenv("TRACKER_PASSWORD")
+                    proxy = self.config.tracker.proxy or os.getenv("TRACKER_PROXY")
+                    
+                    if not username or not password:
+                        logger.error("RuTracker credentials not configured. Please set TRACKER_USERNAME and TRACKER_PASSWORD.")
+                        raise ValueError("RuTracker credentials not configured")
+                    
+                    async with AsyncRuTrackerClient(username, password, proxy) as client:
                         bytes = await client.download(torrent_file_link)
                         with open(file_path, mode='wb') as file:
                             file.write(bytes)

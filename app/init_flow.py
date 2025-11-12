@@ -1026,3 +1026,185 @@ async def ensure_telegram_token(force: bool = False) -> None:
         os.environ.pop("MEDIA_BOT_SETUP_ACTIVE", None)
 
 
+async def ensure_rutracker_credentials(force: bool = False) -> None:
+    """Ensure TRACKER_USERNAME and TRACKER_PASSWORD are available; if not, run the web form setup flow."""
+    tracker_username = os.getenv("TRACKER_USERNAME")
+    tracker_password = os.getenv("TRACKER_PASSWORD")
+    
+    if tracker_username and tracker_password and not force:
+        return
+
+    if os.environ.get("RUTRACKER_SETUP_ACTIVE") == "1":
+        print("[init] RuTracker setup flow already running; ignoring duplicate request.")
+        return
+    os.environ["RUTRACKER_SETUP_ACTIVE"] = "1"
+
+    host_ip = _detect_local_ip()
+    desired_port = 8766  # Different port from main setup
+
+    async def on_credentials_saved(username: str, password: str) -> tuple[bool, Optional[str]]:
+        """Save credentials to .env file."""
+        try:
+            # Persist to .env at project root
+            env_path = _project_root() / ".env"
+            if env_path.exists():
+                content = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+            else:
+                content = []
+            new_lines = _append_or_replace_env_line(content, "TRACKER_USERNAME", username)
+            new_lines = _append_or_replace_env_line(new_lines, "TRACKER_PASSWORD", password)
+            env_path.write_text("".join(new_lines), encoding="utf-8")
+
+            os.environ["TRACKER_USERNAME"] = username
+            os.environ["TRACKER_PASSWORD"] = password
+
+            print("[init] RuTracker credentials saved successfully.")
+            return True, None
+        except Exception as e:
+            error_msg = f"Failed to save credentials: {str(e)}"
+            print(f"[init] {error_msg}")
+            return False, error_msg
+
+    async def _start_rutracker_web_server(
+        host: str, port: int, on_credentials_saved
+    ) -> tuple[web.AppRunner, int]:
+        """Start a minimal aiohttp server that serves a RuTracker credentials form and handles submission.
+
+        Returns:
+            (runner, actual_port)
+        """
+        # Very lightweight request logging
+        @web.middleware
+        async def log_requests(request, handler):
+            peer = request.transport.get_extra_info("peername")
+            print(f"[http] {request.method} {request.path} from {peer}")
+            resp = await handler(request)
+            print(f"[http] -> {resp.status} {request.method} {request.path}")
+            return resp
+
+        async def handle_index(_request: web.Request) -> web.Response:
+            html = _render_template(
+                "rutracker_setup.html",
+                ERROR_BOX="",
+                TRACKER_USERNAME=tracker_username or "",
+                TRACKER_PASSWORD="",
+            )
+            return web.Response(text=html, content_type="text/html")
+
+        async def handle_success(_request: web.Request) -> web.Response:
+            """Show success page."""
+            html_content = _render_template("rutracker_success.html")
+            return web.Response(text=html_content, content_type="text/html")
+
+        async def handle_submit(request: web.Request) -> web.Response:
+            data = await request.post()
+            username = (data.get("tracker_username") or "").strip()
+            password = (data.get("tracker_password") or "").strip()
+            
+            # Validate input
+            if not username or not password:
+                error_html = "<div class=\"error\">Both username and password are required.</div>"
+                html_content = _render_template(
+                    "rutracker_setup.html",
+                    ERROR_BOX=error_html,
+                    TRACKER_USERNAME=username,
+                    TRACKER_PASSWORD="",
+                )
+                return web.Response(text=html_content, content_type="text/html", status=400)
+            
+            # Save credentials
+            success, error_msg = await on_credentials_saved(username, password)
+            
+            if success:
+                return web.Response(
+                    text='{"status": "success"}',
+                    content_type="application/json",
+                    status=200
+                )
+            else:
+                error_html = f"<div class=\"error\">{html.escape(error_msg or 'Failed to save credentials')}</div>"
+                html_content = _render_template(
+                    "rutracker_setup.html",
+                    ERROR_BOX=error_html,
+                    TRACKER_USERNAME=username,
+                    TRACKER_PASSWORD="",
+                )
+                return web.Response(text=html_content, content_type="text/html", status=500)
+        
+        app = web.Application(middlewares=[log_requests])
+        app.router.add_get("/", handle_index)
+        app.router.add_post("/submit", handle_submit)
+        app.router.add_get("/success", handle_success)
+
+        runner = web.AppRunner(app)
+        await runner.setup()
+        # Bind to all interfaces to be reachable on LAN
+        site = web.TCPSite(runner, "0.0.0.0", port)
+        await site.start()
+        # Discover actual bound port
+        sockets = getattr(site._server, "sockets", None)  # type: ignore[attr-defined]
+        actual_port = port
+        if sockets:
+            with suppress(Exception):
+                actual_port = sockets[0].getsockname()[1]
+        print(f"[http] RuTracker setup server listening on {host}:{actual_port}")
+        return runner, actual_port
+
+    runner: web.AppRunner | None = None
+    
+    async def run_flow():
+        nonlocal host_ip, desired_port, runner
+        
+        # Start server; if desired port is busy, fall back to ephemeral port 0
+        try:
+            runner, bound_port = await _start_rutracker_web_server("0.0.0.0", desired_port, on_credentials_saved)
+        except OSError:
+            runner, bound_port = await _start_rutracker_web_server("0.0.0.0", 0, on_credentials_saved)
+        
+        setup_url = f"http://{host_ip}:{bound_port}/"
+        print(f"[init] RuTracker setup URL: {setup_url}")
+        print(f"[init] Please open this URL in your browser to enter RuTracker credentials.")
+        
+        # Wait for credentials with a timeout check in background
+        async def wait_for_credentials():
+            nonlocal runner
+            max_wait = 300  # 5 minutes max wait
+            waited = 0
+            while waited < max_wait and runner is not None:
+                await asyncio.sleep(1)
+                waited += 1
+                # Reload environment from .env file
+                # Note: dotenv is loaded in config.py, but we need to reload it here
+                # We'll read the .env file directly to check for credentials
+                env_path = _project_root() / ".env"
+                if env_path.exists():
+                    content = env_path.read_text(encoding="utf-8")
+                    for line in content.splitlines():
+                        if line.startswith("TRACKER_USERNAME="):
+                            os.environ["TRACKER_USERNAME"] = line.split("=", 1)[1].strip()
+                        elif line.startswith("TRACKER_PASSWORD="):
+                            os.environ["TRACKER_PASSWORD"] = line.split("=", 1)[1].strip()
+                if os.getenv("TRACKER_USERNAME") and os.getenv("TRACKER_PASSWORD"):
+                    print("[init] RuTracker credentials saved, cleaning up server...")
+                    try:
+                        await runner.cleanup()
+                    except Exception as e:
+                        print(f"[init] Error cleaning up server: {e}")
+                    runner = None
+                    os.environ.pop("RUTRACKER_SETUP_ACTIVE", None)
+                    print("[init] RuTracker setup completed.")
+                    return
+            # Timeout - keep server running but log
+            if runner is not None:
+                print(f"[init] RuTracker setup timeout after {max_wait} seconds. Server will keep running.")
+        
+        # Start waiting in background (non-blocking)
+        asyncio.create_task(wait_for_credentials())
+
+    try:
+        await run_flow()
+    except Exception as e:
+        print(f"[init] Error in RuTracker setup flow: {e}")
+        os.environ.pop("RUTRACKER_SETUP_ACTIVE", None)
+
+
