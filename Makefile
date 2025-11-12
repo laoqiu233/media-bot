@@ -23,6 +23,7 @@ shell:
 	poetry shell
 
 run:
+	./app/scripts/prerun.sh
 	poetry run python -m app
 
 test:
