@@ -961,16 +961,35 @@ async def ensure_telegram_token(force: bool = False) -> None:
             while not setup_completed:
                 await asyncio.sleep(0.5)
         finally:
-            # Stop QR code screen and show loading.gif before cleanup
+            # Stop QR code screen and ensure loading.gif is running before cleanup
             if mpv_proc is not None:
                 try:
+                    # First ensure loading.gif is running and visible
                     if loading_path.exists():
+                        # Stop any existing loading.gif to avoid duplicates
+                        if loading_proc is not None and loading_proc.poll() is None:
+                            try:
+                                loading_proc.terminate()
+                                try:
+                                    await asyncio.wait_for(
+                                        asyncio.to_thread(loading_proc.wait), timeout=0.5
+                                    )
+                                except asyncio.TimeoutError:
+                                    loading_proc.kill()
+                                    await asyncio.to_thread(loading_proc.wait)
+                            except Exception:
+                                pass
+                        
+                        # Now start a fresh loading.gif
                         try:
                             loading_proc = await _display_with_mpv(loading_path)
-                            print("[init] Showing loading.gif after QR code screen closed")
+                            print("[init] Showing loading.gif before closing QR code screen")
+                            # Wait for loading.gif to be fully visible (mpv needs time to render)
+                            await asyncio.sleep(1.5)
                         except Exception as e:
                             print(f"[init] Could not show loading.gif: {e}")
-                        await asyncio.sleep(3)
+                    
+                    # Now close QR code screen (loading.gif is already visible and covering it)
                     mpv_proc.terminate()
                     try:
                         await asyncio.wait_for(
@@ -979,7 +998,6 @@ async def ensure_telegram_token(force: bool = False) -> None:
                     except asyncio.TimeoutError:
                         mpv_proc.kill()
                         await asyncio.to_thread(mpv_proc.wait)
-                    # Now show loading.gif
                 except Exception as e:
                     print(f"[init] Error stopping QR code screen: {e}")
                     try:
@@ -987,6 +1005,22 @@ async def ensure_telegram_token(force: bool = False) -> None:
                             mpv_proc.kill()
                     except Exception:
                         pass
+            
+            # Clean up init_flow's loading.gif - let MPV player manage it from now on
+            # The MPV player will show loading.gif when needed (playback ends, etc.)
+            if loading_proc is not None and loading_proc.poll() is None:
+                try:
+                    loading_proc.terminate()
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.to_thread(loading_proc.wait), timeout=0.5
+                        )
+                    except asyncio.TimeoutError:
+                        loading_proc.kill()
+                        await asyncio.to_thread(loading_proc.wait)
+                    print("[init] Stopped init_flow loading.gif - MPV player will manage it now")
+                except Exception as e:
+                    print(f"[init] Error stopping init_flow loading.gif: {e}")
             
             await runner.cleanup()
 

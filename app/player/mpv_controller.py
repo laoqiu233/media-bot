@@ -143,8 +143,14 @@ class MPVController:
 
             logger.info("MPV player initialized successfully")
             
-            # Show loading.gif initially when player is idle
-            asyncio.create_task(self._show_loading_gif())
+            # Show loading.gif when player is idle (no media playing)
+            # This will only run if init_flow has finished (no SETUP_ACTIVE env var)
+            # Check if setup is active to avoid conflicts with init_flow's loading.gif
+            import os
+            if not os.getenv("MEDIA_BOT_SETUP_ACTIVE"):
+                # Setup is complete, show loading.gif if no media is playing
+                if not self._is_playing:
+                    asyncio.create_task(self._show_loading_gif())
 
         except Exception as e:
             logger.error(f"Failed to initialize MPV player: {e}")
