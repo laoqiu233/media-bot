@@ -9,10 +9,12 @@ from pydantic import BaseModel, Field
 # Load environment variables
 load_dotenv()
 
+
 class TrackerConfig(BaseModel):
     proxy: str | None = None
     username: str | None = None
     password: str | None = None
+
 
 class TelegramConfig(BaseModel):
     """Telegram bot configuration."""
@@ -120,7 +122,7 @@ def load_config() -> Config:
         "tracker": {
             "proxy": tracker_proxy,
             "username": tracker_username,
-            "password": tracker_password
+            "password": tracker_password,
         },
         "telegram": {
             "bot_token": telegram_token,

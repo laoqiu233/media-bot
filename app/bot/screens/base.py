@@ -17,6 +17,9 @@ class Context:
     def __init__(self, init_context: dict[str, Any] | None = None):
         self.context = init_context if init_context is not None else {}
 
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.context.get(key, default)
+
     def get_context(self) -> dict[str, Any]:
         return self.context
 
@@ -28,7 +31,7 @@ class Context:
 
 
 class Navigation:
-    def __init__(self, next_screen: str, **kwargs: dict[str, Any]):
+    def __init__(self, next_screen: str, **kwargs: Any):
         self.next_screen = next_screen
         self.kwargs = kwargs
 

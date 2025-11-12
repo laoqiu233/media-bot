@@ -33,6 +33,9 @@ class BotHandlers:
         if not self._is_authorized(update):
             return
 
+        if update.effective_chat is None:
+            return
+
         chat_id = update.effective_chat.id
         await self.session_manager.restart_session(chat_id)
 
@@ -44,7 +47,7 @@ class BotHandlers:
         if not self._is_authorized(update):
             return
 
-        if update.message is None:
+        if update.message is None or update.effective_chat is None:
             return
 
         chat_id = update.effective_chat.id
@@ -57,10 +60,15 @@ class BotHandlers:
         context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
         if not self._is_authorized(update):
-            await update.callback_query.answer()
+            if update.callback_query is not None:
+                await update.callback_query.answer()
             return
 
-        if update.callback_query is None or update.callback_query.message is None:
+        if (
+            update.callback_query is None
+            or update.callback_query.message is None
+            or update.effective_chat is None
+        ):
             return
 
         chat_id = update.effective_chat.id

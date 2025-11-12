@@ -16,7 +16,9 @@ from app.library.imdb_client import IMDbClient
 from app.library.manager import LibraryManager
 from app.player.mpv_controller import player
 from app.scheduler.series_scheduler import get_scheduler
+from app.scheduler.series_updater import SeriesUpdater
 from app.torrent.downloader import DownloadState, get_downloader
+from app.torrent.importer import TorrentImporter
 from app.torrent.searcher import TorrentSearcher
 from app.tv.hdmi_cec import get_cec_controller
 
@@ -55,22 +57,44 @@ async def initialize_components():
     torrent_searcher = TorrentSearcher(config)
     torrent_downloader = get_downloader(config)
 
+    # Initialize torrent importer
+    torrent_importer = TorrentImporter(library_manager, imdb_client)
+
     # Set up callback to import completed downloads to library
     async def on_download_complete(task_id: str, state: DownloadState) -> None:
         """Import completed download to library.
 
         Args:
             task_id: Download task ID
-            state: Download state with metadata
+            state: Download state with metadata and validation result
         """
-        logger.info(f"Processing completed download: {state.name}")
-        download_path = torrent_downloader.get_download_path(task_id)
-        if download_path and download_path.exists():
-            await library_manager.import_from_download(
-                download_path=download_path, torrent_name=state.name, metadata=state.metadata
+        try:
+            logger.info(f"Processing completed download: {state.name}")
+
+            download_path = torrent_downloader.get_download_path(task_id)
+            if not download_path or not download_path.exists():
+                logger.warning(f"Download path not found for task {task_id}")
+                return
+
+            if not state.validation_result:
+                logger.error(f"No validation result for completed download: {task_id}")
+                return
+
+            if not state.metadata:
+                logger.error(f"No metadata for completed download: {task_id}")
+                return
+
+            # Import using TorrentImporter with validation result
+            await torrent_importer.import_download(
+                download_path=download_path,
+                metadata=state.metadata,
+                validation_result=state.validation_result,
             )
-        else:
-            logger.warning(f"Download path not found for task {task_id}")
+
+            logger.info(f"Successfully imported download: {state.name}")
+
+        except Exception as e:
+            logger.error(f"Failed to import download {task_id}: {e}", exc_info=True)
 
     torrent_downloader.set_completion_callback(on_download_complete)
     torrent_downloader.start_monitoring()
@@ -103,6 +127,14 @@ async def initialize_components():
     await series_scheduler.load_progress()
     logger.info("Series scheduler initialized")
 
+    # Initialize series updater (will be started after bot is ready)
+    series_updater = SeriesUpdater(
+        library_manager=library_manager,
+        imdb_client=imdb_client,
+        download_path=config.media_library.download_path,
+        bot_instance=None,  # Will be set after bot initialization
+    )
+
     screen_registry = ScreenRegistry(
         library_manager,
         mpv_controller,
@@ -121,6 +153,7 @@ async def initialize_components():
         torrent_downloader,
         mpv_controller,
         series_scheduler,
+        series_updater,
     )
 
 
@@ -138,6 +171,7 @@ def run_integrated_bot():
         downloader = None
         player_controller = None
         scheduler = None
+        series_updater = None
 
         try:
             # Initialize components
@@ -148,6 +182,7 @@ def run_integrated_bot():
                 downloader,
                 player_controller,
                 scheduler,
+                series_updater,
             ) = await initialize_components()
 
             # Create Telegram application
@@ -196,6 +231,12 @@ def run_integrated_bot():
                 logger.info("Setup complete. Please restart the bot.")
                 return
 
+            # Start series updater (now that bot is ready)
+            if series_updater:
+                series_updater.bot_instance = application.bot
+                series_updater.start()
+                logger.info("Series updater started")
+
             # Keep the bot running
             try:
                 # Wait indefinitely until interrupted
@@ -220,6 +261,8 @@ def run_integrated_bot():
                 player_controller.shutdown()
             if scheduler:
                 await scheduler.save_progress()
+            if series_updater:
+                series_updater.stop()
             logger.info("Shutdown complete")
 
     # Run the async main function

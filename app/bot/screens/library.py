@@ -1,22 +1,25 @@
-"""Library screen for browsing movies."""
+"""Library screen for browsing media entities (movies and series)."""
 
 import logging
-from pathlib import Path
 
 from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.bot.callback_data import (
     LIBRARY_CLEAR_FILTER,
-    LIBRARY_CONFIRM_DELETE,
-    LIBRARY_DELETE_MOVIE,
+    LIBRARY_DELETE_ENTITY,
+    LIBRARY_DOWNLOAD_EPISODE,
     LIBRARY_MAIN,
     LIBRARY_MOVIES,
     LIBRARY_MOVIES_NEXT,
     LIBRARY_MOVIES_PREV,
-    LIBRARY_PLAY_MOVIE,
+    LIBRARY_PLAY_FILE,
     LIBRARY_SCAN,
     LIBRARY_SEARCH,
-    LIBRARY_VIEW_MOVIE,
+    LIBRARY_SELECT_FILE,
+    LIBRARY_VIEW_ENTITY,
+    LIBRARY_VIEW_EPISODE,
+    LIBRARY_VIEW_SEASON_EPISODES,
+    LIBRARY_VIEW_SERIES_SEASONS,
 )
 from app.bot.screens.base import (
     Context,
@@ -26,32 +29,51 @@ from app.bot.screens.base import (
     ScreenHandlerResult,
     ScreenRenderResult,
 )
+from app.library.models import MediaType
 
 logger = logging.getLogger(__name__)
 
 
 class LibraryScreen(Screen):
+    """Screen for browsing media library."""
+
     def __init__(self, library_manager, player):
+        """Initialize library screen.
+
+        Args:
+            library_manager: Library manager instance
+            player: Player controller instance
+        """
         self.library = library_manager
         self.player = player
 
     def get_name(self) -> str:
+        """Get screen name."""
         return "library"
 
     async def render(self, context: Context) -> ScreenRenderResult:
-        view = context.get_context().get("view", "main")  # main, list, detail, delete_confirm
+        """Render the library screen based on current view."""
+        view = context.get_context().get("view", "main")
 
         if view == "main":
             return await self._render_main(context)
         elif view == "list":
             return await self._render_list(context)
-        elif view == "detail":
-            return await self._render_detail(context)
-        elif view == "delete_confirm":
-            return await self._render_delete_confirm(context)
+        elif view == "entity_detail":
+            return await self._render_entity_detail(context)
+        elif view == "file_selection":
+            return await self._render_file_selection(context)
+        elif view == "series_seasons":
+            return await self._render_series_seasons(context)
+        elif view == "season_episodes":
+            return await self._render_season_episodes(context)
+        elif view == "episode_detail":
+            return await self._render_episode_detail(context)
 
     async def _render_main(self, context: Context) -> ScreenRenderResult:
-        movies = await self.library.get_all_movies()
+        """Render main library view."""
+        movies = await self.library.get_all_media_entities(MediaType.MOVIE)
+        series = await self.library.get_all_media_entities(MediaType.SERIES)
 
         text = "📚 *My Library*\n\n"
 
@@ -59,7 +81,9 @@ class LibraryScreen(Screen):
         if context.get_context().get("scan_result"):
             text += f"{context.get_context().get('scan_result')}\n\n"
 
-        if not movies:
+        total_items = len(movies) + len(series)
+
+        if total_items == 0:
             text += "Your library is empty.\nSearch and download content to get started!"
             keyboard = [
                 [InlineKeyboardButton("🔍 Search Content", callback_data=LIBRARY_SEARCH)],
@@ -67,39 +91,50 @@ class LibraryScreen(Screen):
                 [InlineKeyboardButton("« Back to Menu", callback_data=LIBRARY_MAIN)],
             ]
         else:
-            text += f"You have *{len(movies)}* movies in your library.\n\n"
+            text += f"You have *{len(movies)}* movies and *{len(series)}* series.\n\n"
             text += "Select an option to continue:"
 
-            keyboard = [
-                [
-                    InlineKeyboardButton(
-                        f"🎬 Browse Movies ({len(movies)})", callback_data=LIBRARY_MOVIES
-                    )
-                ],
-                [InlineKeyboardButton("🔄 Scan Library", callback_data=LIBRARY_SCAN)],
-                [InlineKeyboardButton("« Back to Menu", callback_data=LIBRARY_MAIN)],
-            ]
+            keyboard = []
+            if movies:
+                keyboard.append(
+                    [
+                        InlineKeyboardButton(
+                            f"🎬 Browse Movies ({len(movies)})", callback_data=LIBRARY_MOVIES
+                        )
+                    ]
+                )
+            if series:
+                keyboard.append(
+                    [
+                        InlineKeyboardButton(
+                            f"📺 Browse Series ({len(series)})",
+                            callback_data=LIBRARY_VIEW_SERIES_SEASONS,
+                        )
+                    ]
+                )
+            keyboard.append([InlineKeyboardButton("🔄 Scan Library", callback_data=LIBRARY_SCAN)])
+            keyboard.append([InlineKeyboardButton("« Back to Menu", callback_data=LIBRARY_MAIN)])
 
         return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
     async def _render_list(self, context: Context) -> ScreenRenderResult:
-        """Render paginated movie list with filtering."""
-        all_movies = await self.library.get_all_movies()
+        """Render paginated entity list with filtering."""
+        all_entities = await self.library.get_all_media_entities(MediaType.MOVIE)
         page = context.get_context().get("page", 0)
         filter_query = context.get_context().get("filter_query", "")
         items_per_page = 8
 
         # Apply filter if active
         if filter_query:
-            movies = await self._filter_movies(all_movies, filter_query)
+            entities = await self._filter_entities(all_entities, filter_query)
             text = f"🎬 *Movies* - Filtered by: '{filter_query}'\n\n"
-            text += f"Found {len(movies)} matching movies\n\n"
+            text += f"Found {len(entities)} matching movies\n\n"
         else:
-            movies = all_movies
-            text = f"🎬 *Movies* ({len(movies)} total)\n\n"
+            entities = all_entities
+            text = f"🎬 *Movies* ({len(entities)} total)\n\n"
             text += "💡 _Send a message to filter movies_\n\n"
 
-        if not movies:
+        if not entities:
             if filter_query:
                 text += "No movies match your filter.\n\nTry a different search term."
             else:
@@ -114,31 +149,33 @@ class LibraryScreen(Screen):
             return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
         # Paginate
-        total_pages = (len(movies) - 1) // items_per_page + 1
+        total_pages = (len(entities) - 1) // items_per_page + 1
         start_idx = page * items_per_page
-        end_idx = min(start_idx + items_per_page, len(movies))
-        page_movies = movies[start_idx:end_idx]
+        end_idx = min(start_idx + items_per_page, len(entities))
+        page_entities = entities[start_idx:end_idx]
 
         text += f"Page {page + 1}/{total_pages}\n\n"
         text += "Select a movie to view details:"
 
         keyboard = []
 
-        # Movie buttons - show short info
-        for movie in page_movies:
-            # Build button text with short info
-            button_text = f"{movie.title}"
-            if movie.year:
-                button_text += f" ({movie.year})"
+        # Entity buttons
+        for entity in page_entities:
+            button_text = f"{entity.title}"
+            if entity.year:
+                button_text += f" ({entity.year})"
 
-            # Add IMDb rating if available
-            if hasattr(movie, "rating") and movie.rating:
-                button_text += f" ⭐{movie.rating:.1f}"
+            if entity.rating:
+                button_text += f" ⭐{entity.rating:.1f}"
 
-            button_text = button_text[:60]  # Truncate if too long
+            button_text = button_text[:60]  # Truncate
 
             keyboard.append(
-                [InlineKeyboardButton(button_text, callback_data=f"{LIBRARY_VIEW_MOVIE}{movie.id}")]
+                [
+                    InlineKeyboardButton(
+                        button_text, callback_data=f"{LIBRARY_VIEW_ENTITY}{entity.id}"
+                    )
+                ]
             )
 
         # Navigation buttons
@@ -147,13 +184,13 @@ class LibraryScreen(Screen):
             nav_buttons.append(
                 InlineKeyboardButton("« Previous", callback_data=LIBRARY_MOVIES_PREV)
             )
-        if end_idx < len(movies):
+        if end_idx < len(entities):
             nav_buttons.append(InlineKeyboardButton("Next »", callback_data=LIBRARY_MOVIES_NEXT))
 
         if nav_buttons:
             keyboard.append(nav_buttons)
 
-        # Clear filter button (only show when filter is active)
+        # Clear filter button
         if filter_query:
             keyboard.append(
                 [InlineKeyboardButton("❌ Clear Filter", callback_data=LIBRARY_CLEAR_FILTER)]
@@ -164,137 +201,327 @@ class LibraryScreen(Screen):
 
         return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
-    async def _render_detail(self, context: Context) -> ScreenRenderResult:
-        """Render detailed movie view with poster."""
-        movie_id = context.get_context().get("selected_movie_id")
+    async def _render_entity_detail(self, context: Context) -> ScreenRenderResult:
+        """Render entity detail view."""
+        entity_id = context.get_context().get("selected_entity_id")
 
-        if not movie_id:
-            # Fallback to list view
+        if not entity_id:
             context.update_context(view="list", page=0)
             return await self._render_list(context)
 
-        movie = await self.library.get_movie(movie_id)
+        entity = await self.library.get_media_entity_by_id(entity_id)
 
-        if not movie:
+        if not entity:
             context.update_context(view="list", page=0)
             return await self._render_list(context)
 
-        # Build detailed movie information
-        text = f"🎬 *{movie.title}*"
-        if movie.year:
-            text += f" ({movie.year})"
+        # Build entity information
+        text = f"🎬 *{entity.title}*"
+        if entity.year:
+            text += f" ({entity.year})"
         text += "\n\n"
 
-        # IMDb Rating
-        if hasattr(movie, "rating") and movie.rating:
-            stars = "⭐" * int(movie.rating / 2)
-            text += f"{stars} *{movie.rating:.1f}/10*\n\n"
+        # Rating
+        if entity.rating:
+            stars = "⭐" * int(entity.rating / 2)
+            text += f"{stars} *{entity.rating:.1f}/10*\n\n"
 
         # Genres
-        if movie.genres:
+        if entity.genres:
             genres_text = ", ".join(
                 [
-                    g.capitalize() if isinstance(g, str) else g.value.capitalize()
-                    for g in movie.genres
+                    g.value.capitalize() if hasattr(g, "value") else str(g).capitalize()
+                    for g in entity.genres
                 ]
             )
             text += f"🎭 *Genres:* {genres_text}\n\n"
 
-        # Director
-        if hasattr(movie, "director") and movie.director:
-            text += f"🎬 *Director:* {movie.director}\n\n"
+        # Director (for movies)
+        if entity.media_type == MediaType.MOVIE and entity.director:
+            text += f"🎬 *Director:* {entity.director}\n\n"
 
-        # Cast
-        if hasattr(movie, "cast") and movie.cast:
-            cast_text = ", ".join(movie.cast[:3])  # Show top 3
+        # Cast (for movies)
+        if entity.media_type == MediaType.MOVIE and entity.cast:
+            cast_text = ", ".join(entity.cast[:3])
             text += f"⭐ *Cast:* {cast_text}\n\n"
 
-        # Description/Plot
-        if movie.description:
-            plot = movie.description
-            # Limit plot length for readability
+        # Description
+        if entity.description:
+            plot = entity.description
             if len(plot) > 300:
                 plot = plot[:297] + "..."
             text += f"📖 *Plot:*\n{plot}\n\n"
 
-        # File info
-        if movie.quality:
-            quality = movie.quality.value if hasattr(movie.quality, "value") else movie.quality
-            text += f"📺 *Quality:* {quality}\n"
+        # Files info
+        if entity.downloaded_files:
+            text += f"📁 *Files:* {len(entity.downloaded_files)} downloaded file(s)\n"
 
-        if movie.file_size:
-            size_gb = movie.file_size / (1024**3)
-            text += f"💾 *Size:* {size_gb:.2f} GB\n"
+        # Build keyboard
+        keyboard = []
 
-        # Build keyboard with actions
-        keyboard = [
-            [InlineKeyboardButton("▶️ Play", callback_data=f"{LIBRARY_PLAY_MOVIE}{movie.id}")],
-            [InlineKeyboardButton("🗑️ Delete", callback_data=f"{LIBRARY_DELETE_MOVIE}{movie.id}")],
-            [InlineKeyboardButton("« Back to Movies", callback_data=LIBRARY_MOVIES)],
-        ]
+        if entity.media_type == MediaType.MOVIE:
+            # Movie: show file selection if multiple files, or play directly
+            if len(entity.downloaded_files) > 1:
+                keyboard.append(
+                    [
+                        InlineKeyboardButton(
+                            "📁 Select File", callback_data=f"{LIBRARY_SELECT_FILE}{entity.id}"
+                        )
+                    ]
+                )
+            elif len(entity.downloaded_files) == 1:
+                keyboard.append(
+                    [
+                        InlineKeyboardButton(
+                            "▶️ Play",
+                            callback_data=f"{LIBRARY_PLAY_FILE}{entity.downloaded_files[0].id}",
+                        )
+                    ]
+                )
 
-        # Get poster URL (direct HTTP URL)
-        poster_url = movie.poster_url if movie.poster_url else None
+        elif entity.media_type == MediaType.SERIES:
+            # Series: show seasons
+            keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        "📺 View Seasons", callback_data=f"{LIBRARY_VIEW_SERIES_SEASONS}{entity.id}"
+                    )
+                ]
+            )
+
+        keyboard.append(
+            [InlineKeyboardButton("🗑️ Delete", callback_data=f"{LIBRARY_DELETE_ENTITY}{entity.id}")]
+        )
+        keyboard.append([InlineKeyboardButton("« Back to Library", callback_data=LIBRARY_MAIN)])
+
+        poster_url = entity.poster_url if entity.poster_url else None
 
         return text, InlineKeyboardMarkup(keyboard), RenderOptions(photo_url=poster_url)
 
-    async def _render_delete_confirm(self, context: Context) -> ScreenRenderResult:
-        """Render delete confirmation dialog."""
-        movie_id = context.get_context().get("selected_movie_id")
+    async def _render_file_selection(self, context: Context) -> ScreenRenderResult:
+        """Render file selection view for entity with multiple files."""
+        entity_id = context.get_context().get("selected_entity_id")
 
-        if not movie_id:
+        if not entity_id:
             context.update_context(view="list", page=0)
             return await self._render_list(context)
 
-        movie = await self.library.get_movie(movie_id)
+        entity = await self.library.get_media_entity_by_id(entity_id)
 
-        if not movie:
-            context.update_context(view="list", page=0)
-            return await self._render_list(context)
+        if not entity or not entity.downloaded_files:
+            context.update_context(view="entity_detail", selected_entity_id=entity_id)
+            return await self._render_entity_detail(context)
 
-        text = "⚠️ *Delete Movie*\n\n"
-        text += "Are you sure you want to delete:\n\n"
-        text += f"*{movie.title}*"
-        if movie.year:
-            text += f" ({movie.year})"
-        text += "\n\n"
-        text += "⚠️ This will permanently delete the movie file and metadata."
+        text = "📁 *Select File*\n\n"
+        text += f"*{entity.title}*\n\n"
+        text += "Select a file to play:\n\n"
 
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    "✅ Yes, Delete", callback_data=f"{LIBRARY_CONFIRM_DELETE}{movie.id}"
-                )
-            ],
-            [InlineKeyboardButton("❌ Cancel", callback_data=f"{LIBRARY_VIEW_MOVIE}{movie.id}")],
-        ]
+        keyboard = []
+
+        for file in entity.downloaded_files:
+            file_info = f"{file.quality.value if hasattr(file.quality, 'value') else file.quality}"
+            if file.file_size:
+                size_gb = file.file_size / (1024**3)
+                file_info += f" ({size_gb:.2f} GB)"
+
+            keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        f"▶️ {file_info}", callback_data=f"{LIBRARY_PLAY_FILE}{file.id}"
+                    )
+                ]
+            )
+
+        keyboard.append(
+            [InlineKeyboardButton("« Back", callback_data=f"{LIBRARY_VIEW_ENTITY}{entity_id}")]
+        )
 
         return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
-    async def _filter_movies(self, movies, query: str):
-        """Filter movies by query in title, description, and genres."""
+    async def _render_series_seasons(self, context: Context) -> ScreenRenderResult:
+        """Render series seasons list."""
+        series_id = context.get_context().get("selected_series_id")
+
+        if not series_id:
+            context.update_context(view="main")
+            return await self._render_main(context)
+
+        series = await self.library.get_media_entity_by_id(series_id)
+
+        if not series or series.media_type != MediaType.SERIES:
+            context.update_context(view="main")
+            return await self._render_main(context)
+
+        seasons = await self.library.get_series_seasons(series_id)
+
+        text = f"📺 *{series.title}*\n\n"
+        text += "*Seasons*\n\n"
+
+        if not seasons:
+            text += "No seasons available.\n"
+
+        keyboard = []
+
+        for season in seasons:
+            season_num = season.season_number or 0
+            keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        f"Season {season_num}",
+                        callback_data=f"{LIBRARY_VIEW_SEASON_EPISODES}{season.id}",
+                    )
+                ]
+            )
+
+        keyboard.append([InlineKeyboardButton("« Back to Library", callback_data=LIBRARY_MAIN)])
+
+        poster_url = series.poster_url if series.poster_url else None
+
+        return text, InlineKeyboardMarkup(keyboard), RenderOptions(photo_url=poster_url)
+
+    async def _render_season_episodes(self, context: Context) -> ScreenRenderResult:
+        """Render season episodes list."""
+        season_id = context.get_context().get("selected_season_id")
+
+        if not season_id:
+            context.update_context(view="main")
+            return await self._render_main(context)
+
+        season = await self.library.get_media_entity_by_id(season_id)
+
+        if not season or season.media_type != MediaType.SEASON:
+            context.update_context(view="main")
+            return await self._render_main(context)
+
+        episodes = await self.library.get_season_episodes(season_id)
+
+        text = f"📺 *{season.title}*\n\n"
+        text += "*Episodes*\n\n"
+
+        if not episodes:
+            text += "No episodes available.\n"
+
+        keyboard = []
+
+        for episode in episodes:
+            ep_num = episode.episode_number or 0
+            ep_title = episode.episode_title or episode.title
+            button_text = f"E{ep_num:02d}: {ep_title[:40]}"
+
+            keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        button_text, callback_data=f"{LIBRARY_VIEW_EPISODE}{episode.id}"
+                    )
+                ]
+            )
+
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    "« Back to Seasons",
+                    callback_data=f"{LIBRARY_VIEW_SERIES_SEASONS}{season.series_id}",
+                )
+            ]
+        )
+
+        return text, InlineKeyboardMarkup(keyboard), RenderOptions()
+
+    async def _render_episode_detail(self, context: Context) -> ScreenRenderResult:
+        """Render episode detail view."""
+        episode_id = context.get_context().get("selected_episode_id")
+
+        if not episode_id:
+            context.update_context(view="main")
+            return await self._render_main(context)
+
+        episode = await self.library.get_media_entity_by_id(episode_id)
+
+        if not episode or episode.media_type != MediaType.EPISODE:
+            context.update_context(view="main")
+            return await self._render_main(context)
+
+        text = f"📺 *{episode.title}*\n\n"
+
+        if episode.episode_title:
+            text += f"*{episode.episode_title}*\n\n"
+
+        if episode.description:
+            plot = episode.description
+            if len(plot) > 300:
+                plot = plot[:297] + "..."
+            text += f"📖 *Plot:*\n{plot}\n\n"
+
+        if episode.air_date:
+            text += f"📅 *Air Date:* {episode.air_date.strftime('%Y-%m-%d')}\n\n"
+
+        if episode.downloaded_files:
+            text += f"📁 *Files:* {len(episode.downloaded_files)} downloaded file(s)\n"
+
+        keyboard = []
+
+        # File selection or play
+        if len(episode.downloaded_files) > 1:
+            keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        "📁 Select File", callback_data=f"{LIBRARY_SELECT_FILE}{episode.id}"
+                    )
+                ]
+            )
+        elif len(episode.downloaded_files) == 1:
+            keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        "▶️ Play",
+                        callback_data=f"{LIBRARY_PLAY_FILE}{episode.downloaded_files[0].id}",
+                    )
+                ]
+            )
+
+        # Download options
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    "⬇️ Download Episode", callback_data=f"{LIBRARY_DOWNLOAD_EPISODE}{episode.id}"
+                )
+            ]
+        )
+
+        if episode.season_id:
+            season = await self.library.get_media_entity_by_id(episode.season_id)
+            if season:
+                keyboard.append(
+                    [
+                        InlineKeyboardButton(
+                            "« Back to Episodes",
+                            callback_data=f"{LIBRARY_VIEW_SEASON_EPISODES}{season.id}",
+                        )
+                    ]
+                )
+
+        return text, InlineKeyboardMarkup(keyboard), RenderOptions()
+
+    async def _filter_entities(self, entities, query: str):
+        """Filter entities by query."""
         query_lower = query.lower()
         filtered = []
 
-        for movie in movies:
-            # Check title
-            if query_lower in movie.title.lower():
-                filtered.append(movie)
+        for entity in entities:
+            if query_lower in entity.title.lower():
+                filtered.append(entity)
                 continue
 
-            # Check description
-            if movie.description and query_lower in movie.description.lower():
-                filtered.append(movie)
+            if entity.description and query_lower in entity.description.lower():
+                filtered.append(entity)
                 continue
 
-            # Check genres
-            if movie.genres:
+            if entity.genres:
                 genres_text = " ".join(
-                    [g.value if hasattr(g, "value") else str(g) for g in movie.genres]
+                    [g.value if hasattr(g, "value") else str(g) for g in entity.genres]
                 ).lower()
                 if query_lower in genres_text:
-                    filtered.append(movie)
-                    continue
+                    filtered.append(entity)
 
         return filtered
 
@@ -303,6 +530,7 @@ class LibraryScreen(Screen):
         query: CallbackQuery,
         context: Context,
     ) -> ScreenHandlerResult:
+        """Handle callback queries."""
         if query.data == LIBRARY_SEARCH:
             return Navigation("search")
 
@@ -327,21 +555,37 @@ class LibraryScreen(Screen):
         elif query.data == LIBRARY_SCAN:
             await self._scan_library(query, context)
 
-        elif query.data.startswith(LIBRARY_VIEW_MOVIE):
-            movie_id = query.data[len(LIBRARY_VIEW_MOVIE) :]
-            context.update_context(view="detail", selected_movie_id=movie_id)
+        elif query.data.startswith(LIBRARY_VIEW_ENTITY):
+            entity_id = query.data[len(LIBRARY_VIEW_ENTITY) :]
+            context.update_context(view="entity_detail", selected_entity_id=entity_id)
 
-        elif query.data.startswith(LIBRARY_PLAY_MOVIE):
-            movie_id = query.data[len(LIBRARY_PLAY_MOVIE) :]
-            return await self._play_movie(query, movie_id)
+        elif query.data.startswith(LIBRARY_SELECT_FILE):
+            entity_id = query.data[len(LIBRARY_SELECT_FILE) :]
+            context.update_context(view="file_selection", selected_entity_id=entity_id)
 
-        elif query.data.startswith(LIBRARY_DELETE_MOVIE):
-            movie_id = query.data[len(LIBRARY_DELETE_MOVIE) :]
-            context.update_context(view="delete_confirm", selected_movie_id=movie_id)
+        elif query.data.startswith(LIBRARY_PLAY_FILE):
+            file_id = query.data[len(LIBRARY_PLAY_FILE) :]
+            return await self._play_file(query, file_id)
 
-        elif query.data.startswith(LIBRARY_CONFIRM_DELETE):
-            movie_id = query.data[len(LIBRARY_CONFIRM_DELETE) :]
-            await self._delete_movie(query, context, movie_id)
+        elif query.data.startswith(LIBRARY_VIEW_SERIES_SEASONS):
+            series_id = query.data[len(LIBRARY_VIEW_SERIES_SEASONS) :]
+            context.update_context(view="series_seasons", selected_series_id=series_id)
+
+        elif query.data.startswith(LIBRARY_VIEW_SEASON_EPISODES):
+            season_id = query.data[len(LIBRARY_VIEW_SEASON_EPISODES) :]
+            context.update_context(view="season_episodes", selected_season_id=season_id)
+
+        elif query.data.startswith(LIBRARY_VIEW_EPISODE):
+            episode_id = query.data[len(LIBRARY_VIEW_EPISODE) :]
+            context.update_context(view="episode_detail", selected_episode_id=episode_id)
+
+        elif query.data.startswith(LIBRARY_DOWNLOAD_EPISODE):
+            episode_id = query.data[len(LIBRARY_DOWNLOAD_EPISODE) :]
+            await query.answer("Download feature coming soon", show_alert=True)
+
+        elif query.data.startswith(LIBRARY_DELETE_ENTITY):
+            entity_id = query.data[len(LIBRARY_DELETE_ENTITY) :]
+            await query.answer("Delete feature coming soon", show_alert=True)
 
     async def handle_message(
         self,
@@ -349,98 +593,67 @@ class LibraryScreen(Screen):
         context: Context,
     ) -> ScreenHandlerResult:
         """Handle text messages for filtering."""
-        # Only handle messages when in list view
         view = context.get_context().get("view", "main")
         if view != "list":
             return None
 
-        # Get the search query from the message
-        query = message.text.strip()
-
-        if not query:
+        query_text = message.text.strip()
+        if not query_text:
             return None
 
-        # Apply filter and reset to page 0
-        context.update_context(filter_query=query, page=0, view="list")
-
-        return None  # Stay on current screen, will re-render with filter
+        context.update_context(filter_query=query_text, page=0, view="list")
+        return None
 
     async def _scan_library(
         self,
         query: CallbackQuery,
         context: Context,
     ) -> None:
+        """Scan library."""
         try:
             await query.answer("Scanning library...")
-
             movies_count, series_count = await self.library.scan_library()
-
-            context.update_context(scan_result=f"✅ Scanned: {movies_count} movies")
-
+            context.update_context(
+                scan_result=f"✅ Scanned: {movies_count} movies, {series_count} series"
+            )
         except Exception as e:
             logger.error(f"Error scanning library: {e}")
             await query.answer("Error scanning library", show_alert=True)
 
-    async def _play_movie(
+    async def _play_file(
         self,
         query: CallbackQuery,
-        movie_id: str,
+        file_id: str,
     ) -> ScreenHandlerResult:
+        """Play a downloaded file."""
         try:
-            movie = await self.library.get_movie(movie_id)
+            # Find file by ID
+            all_entities = await self.library.get_all_media_entities()
+            file_path = None
+            file_title = "Unknown"
 
-            if not movie or not movie.file_path:
-                await query.answer("Movie file not found", show_alert=True)
+            for entity in all_entities:
+                for downloaded_file in entity.downloaded_files:
+                    if downloaded_file.id == file_id:
+                        file_path = downloaded_file.file_path
+                        file_title = entity.title
+                        break
+                if file_path:
+                    break
+
+            if not file_path or not file_path.exists():
+                await query.answer("File not found", show_alert=True)
                 return
 
-            file_path = (
-                Path(movie.file_path) if isinstance(movie.file_path, str) else movie.file_path
-            )
-
-            if not file_path.exists():
-                await query.answer(f"File not found: {movie.title}", show_alert=True)
-                logger.error(f"Movie file does not exist: {file_path}")
-                return
-
-            await query.answer(f"Playing: {movie.title}")
+            await query.answer(f"Playing: {file_title}")
 
             success = await self.player.play(file_path)
 
             if success:
-                # Navigate to player screen
                 return Navigation("player")
             else:
-                await query.answer(f"Failed to play: {movie.title}", show_alert=True)
+                await query.answer(f"Failed to play: {file_title}", show_alert=True)
 
         except Exception as e:
-            logger.error(f"Error playing movie: {e}")
-            await query.answer("Error playing movie", show_alert=True)
-
-    async def _delete_movie(
-        self,
-        query: CallbackQuery,
-        context: Context,
-        movie_id: str,
-    ) -> None:
-        try:
-            movie = await self.library.get_movie(movie_id)
-
-            if not movie:
-                await query.answer("Movie not found", show_alert=True)
-                context.update_context(view="list", page=0)
-                return
-
-            # Delete using library manager
-            success = await self.library.delete_movie(movie_id)
-
-            if success:
-                await query.answer(f"Deleted: {movie.title}")
-            else:
-                await query.answer("Failed to delete movie", show_alert=True)
-
-            # Return to list view
-            context.update_context(view="list", page=0, selected_movie_id=None)
-
-        except Exception as e:
-            logger.error(f"Error deleting movie: {e}")
-            await query.answer("Error deleting movie", show_alert=True)
+            logger.error(f"Error playing file: {e}")
+            await query.answer("Error playing file", show_alert=True)

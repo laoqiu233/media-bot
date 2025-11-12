@@ -42,9 +42,9 @@ class SearchScreen(Screen):
         # If there was an error
         if error:
             text = (
-                "🔍 *Search for Movies*\n\n"
+                "🔍 *Search for movies and series*\n\n"
                 f"❌ Error: {error}\n\n"
-                "Type a movie name to try again."
+                "Type a movie or series name to try again."
             )
             keyboard = [[InlineKeyboardButton("« Back to Menu", callback_data=SEARCH_BACK)]]
             return text, InlineKeyboardMarkup(keyboard), RenderOptions()
@@ -52,17 +52,17 @@ class SearchScreen(Screen):
         # If no results found after search
         if no_results and query:
             text = (
-                "🔍 *Search for Movies*\n\n"
+                "🔍 *Search for movies and series*\n\n"
                 f"No movies found for: _{query}_\n\n"
-                "Try typing a different movie name."
+                "Try typing a different movie or series name."
             )
             keyboard = [[InlineKeyboardButton("« Back to Menu", callback_data=SEARCH_BACK)]]
             return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
         # Default state (ready for search)
         text = (
-            "🔍 *Search for Movies*\n\n"
-            "Type the name of a movie to search IMDb.\n\n"
+            "🔍 *Search for movies and series*\n\n"
+            "Type the name of a movie or series to search IMDb.\n\n"
             "You'll be able to browse results and select torrents."
         )
         keyboard = [[InlineKeyboardButton("« Back to Menu", callback_data=SEARCH_BACK)]]
@@ -86,6 +86,8 @@ class SearchScreen(Screen):
 
     async def handle_message(self, message: Message, context: Context) -> ScreenHandlerResult:
         text = message.text
+        if text is None:
+            return
 
         try:
             # Search IMDb for movies
@@ -96,7 +98,7 @@ class SearchScreen(Screen):
                 return
 
             # Navigate to movie selection with results
-            return Navigation(next_screen="movie_selection", movies=results, query=text)
+            return Navigation(next_screen="movie_selection", titles=results, query=text)
 
         except Exception as e:
             logger.error(f"Error searching IMDb: {e}")

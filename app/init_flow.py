@@ -11,14 +11,12 @@ If no TELEGRAM_BOT_TOKEN is found, it:
 import asyncio
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
 from contextlib import suppress
 from pathlib import Path
-from typing import Optional
-import re
-import html
 
 import qrcode
 from aiohttp import web
@@ -109,7 +107,7 @@ async def _start_web_server(
     """
     # Shared state for connection status tracking
     connection_status: dict[str, str | None] = {"status": None, "message": None}
-    
+
     # Very lightweight request logging
     @web.middleware
     async def log_requests(request, handler):
@@ -137,21 +135,18 @@ async def _start_web_server(
         """Return current connection status as JSON."""
         status = connection_status.get("status", "idle")
         message = connection_status.get("message")
-        
+
         response_data = {"status": status}
         if message:
             response_data["message"] = message
-        
-        return web.Response(
-            text=json.dumps(response_data),
-            content_type="application/json"
-        )
+
+        return web.Response(text=json.dumps(response_data), content_type="application/json")
 
     async def handle_scan_wifi(_request: web.Request) -> web.Response:
         """Scan for available Wi‑Fi networks and return as JSON."""
         wifi_iface = _detect_wifi_interface() or "wlan0"
         networks = []
-        
+
         try:
             # Run nmcli scan in executor to avoid blocking
             loop = asyncio.get_event_loop()
@@ -163,9 +158,9 @@ async def _start_web_server(
                     capture_output=True,
                     text=True,
                     timeout=10,
-                )
+                ),
             )
-            
+
             if scan_result.returncode == 0 and scan_result.stdout:
                 seen_ssids = set()
                 for line in scan_result.stdout.splitlines():
@@ -186,10 +181,9 @@ async def _start_web_server(
                 networks.sort(key=lambda x: int(x.get("signal", 0)), reverse=True)
         except Exception as e:
             print(f"[init] Wi‑Fi scan error: {e}")
-        
+
         return web.Response(
-            text=json.dumps({"networks": networks}),
-            content_type="application/json"
+            text=json.dumps({"networks": networks}), content_type="application/json"
         )
 
     async def handle_success(_request: web.Request) -> web.Response:
@@ -215,11 +209,11 @@ async def _start_web_server(
                 TOKEN=token,
             )
             return web.Response(text=html_content, content_type="text/html", status=400)
-        
+
         # Reset status and start connection in background
         connection_status["status"] = "connecting"
         connection_status["message"] = "Initializing connection..."
-        
+
         async def connect_async():
             """Run connection in background task with status updates."""
             try:
@@ -228,31 +222,31 @@ async def _start_web_server(
                     # Update status during connection
                     connection_status["status"] = "connecting"
                     connection_status["message"] = "Connecting to Wi‑Fi network..."
-                    
+
                     result = await on_token_saved(t, ssid, pwd)
-                    
+
                     if result[0]:  # success
                         connection_status["status"] = "success"
                         connection_status["message"] = None
                     else:  # error
                         connection_status["status"] = "error"
-                        connection_status["message"] = result[1] or "Could not connect to the Wi‑Fi network."
-                    
+                        connection_status["message"] = (
+                            result[1] or "Could not connect to the Wi‑Fi network."
+                        )
+
                     return result
-                
+
                 await on_token_saved_with_status(token, wifi_ssid, wifi_password)
             except Exception as e:
                 connection_status["status"] = "error"
                 connection_status["message"] = f"Connection error: {str(e)}"
-        
+
         # Start connection in background
         asyncio.create_task(connect_async())
-        
+
         # Return 200 immediately
         return web.Response(
-            text='{"status": "accepted"}',
-            content_type="application/json",
-            status=200
+            text='{"status": "accepted"}', content_type="application/json", status=200
         )
 
     async def handle_loading_gif(_request: web.Request) -> web.Response:
@@ -296,6 +290,7 @@ async def _start_web_server(
 def _generate_qr_png(content: str, out_path: Path) -> None:
     img = qrcode.make(content)
     img.save(out_path)
+
 
 def _render_template(template_name: str, **replacements: str) -> str:
     html = (_templates_dir() / template_name).read_text(encoding="utf-8")
@@ -350,7 +345,7 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     qr_factory.add_data(_wifi_qr_payload(ap_ssid, ap_password))
     qr_factory.make(fit=True)
     wifi_qr = qr_factory.make_image(fill_color="black", back_color="white").convert("RGB")
-    
+
     qr_factory = qrcode.QRCode(
         version=1,
         error_correction=qrcode.constants.ERROR_CORRECT_H,  # High error correction for mobile
@@ -494,19 +489,19 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
                 fill=(r, g, b, alpha),
                 font=font_title,
             )
-    
+
     img = Image.alpha_composite(img.convert("RGBA"), title_glow).convert("RGB")
     draw = ImageDraw.Draw(img)
-    
+
     # Draw title shadow for depth
     draw.text((title_x + 2, title_y + 2), title_text, fill=(0, 0, 0), font=font_title)
     # Draw main title with white color (matching form text style)
     draw.text((title_x, title_y), title_text, fill=(255, 255, 255), font=font_title)
-    
+
     # Add QR code labels with stunning styling and decorative elements
     wifi_label = "1. Join Wi‑Fi"
     url_label = "2. Open Setup"
-    
+
     wifi_label_bbox = draw.textbbox((0, 0), wifi_label, font=font_label)
     wifi_label_width = wifi_label_bbox[2] - wifi_label_bbox[0]
     wifi_label_x = offset_x + padding + (qr_size - wifi_label_width) // 2
@@ -541,10 +536,10 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
                 fill=(r, g, b, alpha),
                 font=font_label,
             )
-    
+
     img = Image.alpha_composite(img.convert("RGBA"), label_glow).convert("RGB")
     draw = ImageDraw.Draw(img)
-    
+
     # Draw label shadows
     draw.text((wifi_label_x + 1, label_y + 1), wifi_label, fill=(0, 0, 0), font=font_label)
     draw.text((url_label_x + 1, label_y + 1), url_label, fill=(0, 0, 0), font=font_label)
@@ -624,7 +619,7 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
          url_qr_x + qr_size + card_border, qr_y + qr_size + card_border],
         outline=card_border_color, width=border_width
     )
-    
+
     # Paste QR codes on white backgrounds
     img.paste(wifi_qr, (wifi_qr_x, qr_y))
     img.paste(url_qr, (url_qr_x, qr_y))
@@ -633,11 +628,11 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     text_y = qr_y + qr_size + section_padding
     wifi_text = f"SSID: {ap_ssid}\nPassword: {ap_password}"
     url_text = f"URL:\n{setup_url}"
-    
+
     # Center text under each QR with beautiful shadows and glows
     wifi_text_lines = wifi_text.split("\n")
     url_text_lines = url_text.split("\n")
-    
+
     # Create text glow layer
     text_glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     text_glow_draw = ImageDraw.Draw(text_glow)
@@ -647,7 +642,7 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
         line_bbox = draw.textbbox((0, 0), line, font=font_text)
         line_width = line_bbox[2] - line_bbox[0]
         line_x = wifi_qr_x + (qr_size - line_width) // 2
-        
+
         # Glow effect for text
         for offset in range(3, 0, -1):
             alpha = int(15 * (1 - offset / 3))
@@ -658,12 +653,12 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
                     fill=(200, 240, 255, alpha),
                     font=font_text,
                 )
-    
+
     for i, line in enumerate(url_text_lines):
         line_bbox = draw.textbbox((0, 0), line, font=font_text)
         line_width = line_bbox[2] - line_bbox[0]
         line_x = url_qr_x + (qr_size - line_width) // 2
-        
+
         # Glow effect for text
         for offset in range(3, 0, -1):
             alpha = int(15 * (1 - offset / 3))
@@ -674,10 +669,10 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
                     fill=(200, 240, 255, alpha),
                     font=font_text,
                 )
-    
+
     img = Image.alpha_composite(img.convert("RGBA"), text_glow).convert("RGB")
     draw = ImageDraw.Draw(img)
-    
+
     # Draw text shadows and main text
     for i, line in enumerate(wifi_text_lines):
         line_bbox = draw.textbbox((0, 0), line, font=font_text)
@@ -687,7 +682,7 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
         draw.text((line_x + 2, text_y + i * line_height + 2), line, fill=(0, 0, 0), font=font_text)
         # Main text with vibrant color
         draw.text((line_x, text_y + i * line_height), line, fill=(220, 240, 255), font=font_text)
-    
+
     for i, line in enumerate(url_text_lines):
         line_bbox = draw.textbbox((0, 0), line, font=font_text)
         line_width = line_bbox[2] - line_bbox[0]
@@ -696,7 +691,7 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
         draw.text((line_x + 2, text_y + i * line_height + 2), line, fill=(0, 0, 0), font=font_text)
         # Main text with vibrant color
         draw.text((line_x, text_y + i * line_height), line, fill=(220, 240, 255), font=font_text)
-    
+
     # Save with maximum quality
     img.save(out_path, quality=100, optimize=False)
 
@@ -821,36 +816,74 @@ async def ensure_telegram_token(force: bool = False) -> None:
     current_ap_ssid = os.getenv("SETUP_AP_SSID", "media-bot-setup")
     current_ap_password = os.getenv("SETUP_AP_PASSWORD", "mediabot1234")
 
-    async def on_token_saved(token: str, wifi_ssid: str, wifi_password: str) -> tuple[bool, Optional[str]]:
+    async def on_token_saved(
+        token: str, wifi_ssid: str, wifi_password: str
+    ) -> tuple[bool, str | None]:
         nonlocal mpv_proc, setup_completed, current_ap_ssid, current_ap_password
         wifi_iface = _detect_wifi_interface() or "wlan0"
-        
+
         # Run subprocess in executor to avoid blocking the event loop
         loop = asyncio.get_event_loop()
         connect_result = await loop.run_in_executor(
             None,
             lambda: subprocess.run(
-                ["sudo", "nmcli", "dev", "wifi", "connect", wifi_ssid, "password", wifi_password, "ifname", wifi_iface],
+                [
+                    "sudo",
+                    "nmcli",
+                    "dev",
+                    "wifi",
+                    "connect",
+                    wifi_ssid,
+                    "password",
+                    wifi_password,
+                    "ifname",
+                    wifi_iface,
+                ],
                 check=False,
                 capture_output=True,
                 text=True,
                 timeout=30,  # 30 second timeout
-            )
+            ),
         )
-        
+
         if connect_result.returncode != 0:
             error = (connect_result.stderr if connect_result.stderr else "") or "Failed to connect to the provided Wi‑Fi network."
             print(f"[init] Wi‑Fi connect failed: {error}")
             # Make sure hotspot stays active so the user can retry
-            print("Reconnecting after wrong creds\n", "sudo", "nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password)
+            print(
+                "Reconnecting after wrong creds\n",
+                "sudo",
+                "nmcli",
+                "dev",
+                "wifi",
+                "hotspot",
+                "ifname",
+                wifi_iface,
+                "ssid",
+                current_ap_ssid,
+                "password",
+                current_ap_password,
+            )
             await loop.run_in_executor(
                 None,
                 lambda: subprocess.run(
-                    ["sudo", "nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password],
+                    [
+                        "sudo",
+                        "nmcli",
+                        "dev",
+                        "wifi",
+                        "hotspot",
+                        "ifname",
+                        wifi_iface,
+                        "ssid",
+                        current_ap_ssid,
+                        "password",
+                        current_ap_password,
+                    ],
                     check=False,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
-                )
+                ),
             )
             return False, error
 
@@ -899,9 +932,34 @@ async def ensure_telegram_token(force: bool = False) -> None:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            print("Hosting hotspot\n", "sudo", "nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password)
+            print(
+                "Hosting hotspot\n",
+                "sudo",
+                "nmcli",
+                "dev",
+                "wifi",
+                "hotspot",
+                "ifname",
+                wifi_iface,
+                "ssid",
+                current_ap_ssid,
+                "password",
+                current_ap_password,
+            )
             result = subprocess.run(
-                ["sudo", "nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password],
+                [
+                    "sudo",
+                    "nmcli",
+                    "dev",
+                    "wifi",
+                    "hotspot",
+                    "ifname",
+                    wifi_iface,
+                    "ssid",
+                    current_ap_ssid,
+                    "password",
+                    current_ap_password,
+                ],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -937,9 +995,13 @@ async def ensure_telegram_token(force: bool = False) -> None:
 
         # Start server; if desired port is busy, fall back to ephemeral port 0
         try:
-            runner, bound_port = await _start_web_server("0.0.0.0", desired_port, on_token_saved, current_ap_ssid, current_ap_password)
+            runner, bound_port = await _start_web_server(
+                "0.0.0.0", desired_port, on_token_saved, current_ap_ssid, current_ap_password
+            )
         except OSError:
-            runner, bound_port = await _start_web_server("0.0.0.0", 0, on_token_saved, current_ap_ssid, current_ap_password)
+            runner, bound_port = await _start_web_server(
+                "0.0.0.0", 0, on_token_saved, current_ap_ssid, current_ap_password
+            )
         setup_url = f"http://{ap_ip}:{bound_port}/"
         print(setup_url)
         

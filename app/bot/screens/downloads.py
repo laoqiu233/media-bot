@@ -19,6 +19,7 @@ from app.bot.screens.base import (
     ScreenHandlerResult,
     ScreenRenderResult,
 )
+from app.torrent.downloader import TorrentDownloader, DownloadStatus
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 class DownloadsScreen(Screen):
     """Screen for viewing and managing downloads."""
 
-    def __init__(self, downloader):
+    def __init__(self, downloader: TorrentDownloader):
         """Initialize downloads screen.
 
         Args:
@@ -69,24 +70,24 @@ class DownloadsScreen(Screen):
 
                 # Status line
                 status_emoji = {
-                    "downloading": "⬇️",
-                    "completed": "✅",
-                    "paused": "⏸",
-                    "error": "❌",
+                    DownloadStatus.DOWNLOADING: "⬇️",
+                    DownloadStatus.COMPLETED: "✅",
+                    DownloadStatus.PAUSED: "⏸",
+                    DownloadStatus.ERROR: "❌",
                 }.get(task.status, "📦")
 
-                text += f"{i}. {status_emoji} *{task.torrent_name[:35]}*\n"
+                text += f"{i}. {status_emoji} *{task.name[:35]}*\n"
                 text += f"   {progress_bar} {task.progress:.1f}%\n"
 
                 # Show size info
-                if task.total_bytes > 0:
-                    downloaded_gb = task.downloaded_bytes / 1024 / 1024 / 1024
-                    total_gb = task.total_bytes / 1024 / 1024 / 1024
+                if task.total_wanted > 0:
+                    downloaded_gb = task.total_done / 1024 / 1024 / 1024
+                    total_gb = task.total_wanted / 1024 / 1024 / 1024
                     text += f"   📦 {downloaded_gb:.2f} / {total_gb:.2f} GB\n"
 
-                if task.status == "downloading":
+                if task.status == DownloadStatus.DOWNLOADING:
                     # Download speed and ETA
-                    speed_mb = task.download_speed / 1024 / 1024
+                    speed_mb = task.download_rate / 1024 / 1024
                     text += f"   ⬇️ {speed_mb:.2f} MB/s"
 
                     if task.eta:
@@ -96,43 +97,43 @@ class DownloadsScreen(Screen):
                     text += "\n"
 
                     # Upload speed
-                    upload_mb = task.upload_speed / 1024 / 1024
+                    upload_mb = task.upload_rate / 1024 / 1024
                     text += f"   ⬆️ {upload_mb:.2f} MB/s\n"
 
                     # Seeders and peers
-                    text += f"   🌱 {task.seeders} seeders • 👥 {task.peers} peers\n"
+                    text += f"   🌱 {task.num_seeds} seeders • 👥 {task.num_peers} peers\n"
 
-                elif task.status == "completed":
+                elif task.status == DownloadStatus.COMPLETED:
                     text += "   Status: Completed ✅\n"
                     # Show upload speed even when completed (seeding)
-                    upload_mb = task.upload_speed / 1024 / 1024
+                    upload_mb = task.upload_rate / 1024 / 1024
                     if upload_mb > 0:
                         text += f"   ⬆️ {upload_mb:.2f} MB/s (seeding)\n"
                 else:
-                    text += f"   Status: {task.status}\n"
+                    text += f"   Status: {task.status.value.capitalize()}\n"
 
                 text += "\n"
 
                 # Add control button
-                if task.status == "downloading":
+                if task.status == DownloadStatus.DOWNLOADING:
                     keyboard.append(
                         [
                             InlineKeyboardButton(
-                                f"⏸ Pause #{i}", callback_data=f"{DOWNLOADS_PAUSE}{task.id}"
+                                f"⏸ Pause #{i}", callback_data=f"{DOWNLOADS_PAUSE}{task.task_id}"
                             ),
                             InlineKeyboardButton(
-                                f"❌ Cancel #{i}", callback_data=f"{DOWNLOADS_CANCEL}{task.id}"
+                                f"❌ Cancel #{i}", callback_data=f"{DOWNLOADS_CANCEL}{task.task_id}"
                             ),
                         ]
                     )
-                elif task.status == "paused":
+                elif task.status == DownloadStatus.PAUSED:
                     keyboard.append(
                         [
                             InlineKeyboardButton(
-                                f"▶️ Resume #{i}", callback_data=f"{DOWNLOADS_RESUME}{task.id}"
+                                f"▶️ Resume #{i}", callback_data=f"{DOWNLOADS_RESUME}{task.task_id}"
                             ),
                             InlineKeyboardButton(
-                                f"❌ Cancel #{i}", callback_data=f"{DOWNLOADS_CANCEL}{task.id}"
+                                f"❌ Cancel #{i}", callback_data=f"{DOWNLOADS_CANCEL}{task.task_id}"
                             ),
                         ]
                     )
@@ -174,6 +175,9 @@ class DownloadsScreen(Screen):
             session: The session object
             callback_data: Raw callback data string
         """
+        if query.data is None:
+            return
+
         if query.data == DOWNLOADS_BACK:
             return Navigation("main_menu", add_to_history=False)
 
@@ -182,20 +186,19 @@ class DownloadsScreen(Screen):
 
         elif query.data.startswith(DOWNLOADS_PAUSE):
             task_id = query.data[len(DOWNLOADS_PAUSE) :]
-            await self._pause_download(query, context, task_id)
+            await self._pause_download(query, task_id)
 
         elif query.data.startswith(DOWNLOADS_RESUME):
             task_id = query.data[len(DOWNLOADS_RESUME) :]
-            await self._resume_download(query, context, task_id)
+            await self._resume_download(query, task_id)
 
         elif query.data.startswith(DOWNLOADS_CANCEL):
             task_id = query.data[len(DOWNLOADS_CANCEL) :]
-            await self._cancel_download(query, context, task_id)
+            await self._cancel_download(query, task_id)
 
     async def _pause_download(
         self,
         query: CallbackQuery,
-        context: Context,
         task_id: str,
     ) -> None:
         """Pause a download.
@@ -218,7 +221,6 @@ class DownloadsScreen(Screen):
     async def _resume_download(
         self,
         query: CallbackQuery,
-        context: Context,
         task_id: str,
     ) -> ScreenHandlerResult:
         try:
@@ -234,7 +236,6 @@ class DownloadsScreen(Screen):
     async def _cancel_download(
         self,
         query: CallbackQuery,
-        context: Context,
         task_id: str,
     ) -> ScreenHandlerResult:
         try:

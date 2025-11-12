@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
 from py_rutracker import AsyncRuTrackerClient
 
 try:
@@ -16,25 +17,34 @@ except ImportError:
     lt = None
 
 from app.config import Config
-from app.library.models import DownloadTask
+from app.library.models import MatchedTorrentFiles
+from app.torrent.searcher import TorrentSearchResult
+
+from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+class DownloadStatus(Enum):
+    QUEUED = "queued"
+    DOWNLOADING = "downloading"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    ERROR = "error"
 
 @dataclass
 class DownloadState:
     """Internal download state including libtorrent handle."""
 
-    # Core download info
+    # Core download info (required fields first)
     task_id: str
     handle: Any  # libtorrent handle object
     name: str
-    magnet_link: str
     created_at: datetime
-    metadata: dict | None = None
+    torrent: TorrentSearchResult
+    validation_result: MatchedTorrentFiles
 
     # Runtime state (updated by monitoring loop)
-    status: str = "queued"
+    status: DownloadStatus = DownloadStatus.QUEUED
     progress: float = 0.0
     download_rate: float = 0.0
     upload_rate: float = 0.0
@@ -44,34 +54,6 @@ class DownloadState:
     total_wanted: int = 0
     eta: int | None = None
     completed_at: datetime | None = None
-
-    def to_download_task(self, save_path: Path) -> DownloadTask:
-        """Convert internal state to external DownloadTask model.
-
-        Args:
-            save_path: Download save path
-
-        Returns:
-            DownloadTask model
-        """
-        return DownloadTask(
-            id=self.task_id,
-            torrent_name=self.name,
-            magnet_link=self.magnet_link,
-            status=self.status,
-            progress=self.progress,
-            download_speed=self.download_rate,
-            upload_speed=self.upload_rate,
-            seeders=self.num_seeds,
-            peers=self.num_peers,
-            downloaded_bytes=self.total_done,
-            total_bytes=self.total_wanted,
-            eta=self.eta,
-            save_path=save_path,
-            created_at=self.created_at,
-            completed_at=self.completed_at,
-            metadata=self.metadata,
-        )
 
 
 class TorrentDownloader:
@@ -83,15 +65,10 @@ class TorrentDownloader:
         Args:
             download_path: Directory for downloading torrents
         """
-        if lt is None:
-            raise RuntimeError(
-                "libtorrent is not installed. Please install it: pip install libtorrent"
-            )
-
         self.config = config
         self.download_path = download_path
         self.download_path.mkdir(parents=True, exist_ok=True)
-        download_path.joinpath('torrents').mkdir(exist_ok=True)
+        download_path.joinpath("torrents").mkdir(exist_ok=True)
 
         # Initialize libtorrent session with settings
         try:
@@ -144,31 +121,24 @@ class TorrentDownloader:
             self._monitor_task.cancel()
             logger.info("Download monitoring stopped")
 
-    async def add_download(self, magnet_link: str | None, torrent_file_link: str | None, name: str, metadata: dict | None = None) -> str:
-        """Add a new torrent download.
-
-        Args:
-            magnet_link: Magnet link
-            name: Display name for the download
-            metadata: Optional metadata dict (e.g., IMDb movie data)
-
-        Returns:
-            Download task ID
-        """
+    async def add_download(
+        self,
+        name: str,
+        torrent: TorrentSearchResult,
+        validation_result: MatchedTorrentFiles,
+    ) -> str:
         task_id = str(uuid4())
+        file_priorities = [0] * validation_result.total_files
+        for file in validation_result.matched_files:
+            file_priorities[file.file_index] = 1
 
         try:
-            handle = None
-            if magnet_link is not None:
+            if torrent.magnet_link is not None:
                 # Parse magnet link
-                params = lt.parse_magnet_uri(magnet_link)
-
-                # Add torrent to session
+                params = lt.parse_magnet_uri(torrent.magnet_link)
                 params.save_path = str(self.download_path)
-
-                # Add the torrent
-                handle = self.session.add_torrent(params)
             else:
+<<<<<<< HEAD
                 try:
                     file_name = f"{torrent_file_link[-7:]}.torrent"
                     file_path = self.download_path.joinpath('torrents', file_name)
@@ -195,14 +165,26 @@ class TorrentDownloader:
                     logger.error(f"Error downloading from torrent file link: {e}")
                     raise
                         
+=======
+                torrent_file_path = await torrent.fetch_torrent_file()
+                # Parse torrent info to set file priorities
+                torrent_info = lt.torrent_info(str(torrent_file_path))
+                params = {
+                    "save_path": str(self.download_path),
+                    "ti": torrent_info,
+                }
+            params["file_priorities"] = file_priorities
+            handle = self.session.add_torrent(params)
+
+>>>>>>> 08bf1eb (Added series downloading)
             # Store download state
             self.downloads[task_id] = DownloadState(
                 task_id=task_id,
                 handle=handle,
                 name=name,
-                magnet_link=magnet_link if magnet_link is not None else torrent_file_link,
+                torrent=torrent,
+                validation_result=validation_result,
                 created_at=datetime.now(),
-                metadata=metadata,
             )
 
             logger.info(f"Added torrent download: {name} (ID: {task_id})")
@@ -215,6 +197,7 @@ class TorrentDownloader:
         except Exception as e:
             logger.error(f"Error adding torrent download: {e}")
             raise
+        return "todo"
 
     async def _monitor_downloads(self):
         """Monitor all active downloads."""
@@ -273,55 +256,37 @@ class TorrentDownloader:
             except Exception as e:
                 logger.error(f"Error monitoring downloads: {e}")
 
-    def _get_status_string(self, status) -> str:
-        """Get human-readable status string.
+    def _get_status_string(self, status) -> DownloadStatus:
+        """Get download status enum from libtorrent status.
 
         Args:
             status: libtorrent status object
 
         Returns:
-            Status string
+            DownloadStatus enum value
         """
         if status.paused:
-            return "paused"
+            return DownloadStatus.PAUSED
         elif status.is_seeding:
-            return "completed"
+            return DownloadStatus.COMPLETED
         elif status.state in [
             lt.torrent_status.downloading,
             lt.torrent_status.downloading_metadata,
         ]:
-            return "downloading"
+            return DownloadStatus.DOWNLOADING
         elif status.state == lt.torrent_status.checking_files:
-            return "checking"
+            return DownloadStatus.DOWNLOADING  # Checking is part of downloading
         else:
-            return "queued"
+            return DownloadStatus.QUEUED
 
-    async def get_task_status(self, task_id: str) -> DownloadTask | None:
-        """Get status of a download task.
-
-        Args:
-            task_id: Task ID
-
-        Returns:
-            DownloadTask or None
-        """
-        if task_id not in self.downloads:
-            return None
-
-        state = self.downloads[task_id]
-        return state.to_download_task(self.download_path)
-
-    async def get_all_tasks(self) -> list[DownloadTask]:
+    async def get_all_tasks(self) -> list[DownloadState]:
         """Get all download tasks.
 
         Returns:
             List of download tasks
         """
-        tasks = []
-        for task_id in self.downloads:
-            task = await self.get_task_status(task_id)
-            if task:
-                tasks.append(task)
+        tasks = list(self.downloads.values())
+        tasks.sort(key=lambda x: x.created_at)
         return tasks
 
     async def pause_download(self, task_id: str) -> bool:

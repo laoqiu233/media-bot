@@ -7,7 +7,7 @@ from pathlib import Path
 
 import aiofiles
 
-from app.library.models import Episode, Series, UserWatchProgress
+from app.library.models import MediaEntity, MediaType, UserWatchProgress
 
 logger = logging.getLogger(__name__)
 
@@ -144,52 +144,69 @@ class SeriesScheduler:
         user_progress = self._user_progress.get(user_id, {})
         return list(user_progress.values())
 
-    async def get_next_episode(self, user_id: int, series: Series) -> Episode | None:
+    async def get_next_episode(
+        self, user_id: int, series: MediaEntity, library_manager
+    ) -> MediaEntity | None:
         """Get the next episode to watch for a series.
 
         Args:
             user_id: Telegram user ID
-            series: Series object
+            series: Series MediaEntity
+            library_manager: Library manager instance to fetch episodes
 
         Returns:
-            Next episode or None
+            Next episode MediaEntity or None
         """
-        if not series.episodes:
+        if series.media_type != MediaType.SERIES:
             return None
 
         if not self._loaded:
             await self.load_progress()
 
+        # Get all episodes for the series via seasons
+        seasons = await library_manager.get_series_seasons(series.id)
+        all_episodes: list[MediaEntity] = []
+
+        for season in seasons:
+            episodes = await library_manager.get_season_episodes(season.id)
+            all_episodes.extend(episodes)
+
+        if not all_episodes:
+            return None
+
+        # Sort episodes by season and episode number
+        all_episodes.sort(key=lambda e: (e.season_number or 0, e.episode_number or 0))
+
         # Find the last watched episode
-        last_watched_episode: Episode | None = None
+        last_watched_episode: MediaEntity | None = None
         last_season = 0
         last_episode = 0
 
-        for episode in series.episodes:
+        for episode in all_episodes:
             progress = await self.get_progress(user_id, episode.id)
             if (
                 progress
                 and progress.completed
                 and (
-                    episode.season_number > last_season
-                    or episode.season_number == last_season
-                    and episode.episode_number > last_episode
+                    (episode.season_number or 0) > last_season
+                    or (episode.season_number or 0) == last_season
+                    and (episode.episode_number or 0) > last_episode
                 )
             ):
                 last_watched_episode = episode
-                last_season = episode.season_number
-                last_episode = episode.episode_number
+                last_season = episode.season_number or 0
+                last_episode = episode.episode_number or 0
 
         # If no episodes watched, return first episode
         if last_watched_episode is None:
-            return series.episodes[0] if series.episodes else None
+            return all_episodes[0] if all_episodes else None
 
         # Find next episode
-        for episode in series.episodes:
+        for episode in all_episodes:
             if (
-                episode.season_number > last_season
-                or episode.season_number == last_season
-                and episode.episode_number > last_episode
+                (episode.season_number or 0) > last_season
+                or (episode.season_number or 0) == last_season
+                and (episode.episode_number or 0) > last_episode
             ):
                 return episode
 
@@ -220,14 +237,20 @@ class SeriesScheduler:
 
         return continue_watching
 
-    async def mark_episode_watched(self, user_id: int, episode: Episode):
+    async def mark_episode_watched(self, user_id: int, episode: MediaEntity):
         """Mark an episode as watched.
 
         Args:
             user_id: Telegram user ID
-            episode: Episode object
+            episode: Episode MediaEntity
         """
-        duration = episode.duration or 0
+        if episode.media_type != MediaType.EPISODE:
+            logger.warning(f"Attempted to mark non-episode as watched: {episode.id}")
+            return
+
+        # Duration would need to be fetched from file metadata or stored separately
+        # For now, use a default or 0
+        duration = 0
         await self.update_progress(
             user_id=user_id,
             media_id=episode.id,
@@ -238,17 +261,36 @@ class SeriesScheduler:
 
         logger.info(f"Marked episode as watched: {episode.title} (user: {user_id})")
 
-    async def get_series_progress(self, user_id: int, series: Series) -> dict[str, any]:
+    async def get_series_progress(
+        self, user_id: int, series: MediaEntity, library_manager
+    ) -> dict[str, any]:
         """Get overall progress for a series.
 
         Args:
             user_id: Telegram user ID
-            series: Series object
+            series: Series MediaEntity
+            library_manager: Library manager instance to fetch episodes
 
         Returns:
             Dictionary with series progress information
         """
-        if not series.episodes:
+        if series.media_type != MediaType.SERIES:
+            return {
+                "total_episodes": 0,
+                "watched_episodes": 0,
+                "progress_percentage": 0.0,
+                "next_episode": None,
+            }
+
+        # Get all episodes for the series via seasons
+        seasons = await library_manager.get_series_seasons(series.id)
+        all_episodes: list[MediaEntity] = []
+
+        for season in seasons:
+            episodes = await library_manager.get_season_episodes(season.id)
+            all_episodes.extend(episodes)
+
+        if not all_episodes:
             return {
                 "total_episodes": 0,
                 "watched_episodes": 0,
@@ -257,17 +299,19 @@ class SeriesScheduler:
             }
 
         watched_count = 0
-        for episode in series.episodes:
+        for episode in all_episodes:
             progress = await self.get_progress(user_id, episode.id)
             if progress and progress.completed:
                 watched_count += 1
 
-        next_episode = await self.get_next_episode(user_id, series)
+        next_episode = await self.get_next_episode(user_id, series, library_manager)
 
         return {
-            "total_episodes": len(series.episodes),
+            "total_episodes": len(all_episodes),
             "watched_episodes": watched_count,
-            "progress_percentage": (watched_count / len(series.episodes)) * 100,
+            "progress_percentage": (watched_count / len(all_episodes)) * 100
+            if all_episodes
+            else 0.0,
             "next_episode": next_episode,
         }
 
@@ -311,17 +355,17 @@ class SeriesScheduler:
         logger.info(f"Reminder scheduled for user {user_id}, series {series_id} at {reminder_time}")
 
     async def get_recommendations_for_user(
-        self, user_id: int, all_series: list[Series], limit: int = 5
-    ) -> list[Series]:
+        self, user_id: int, all_series: list[MediaEntity], limit: int = 5
+    ) -> list[MediaEntity]:
         """Get series recommendations based on watch history.
 
         Args:
             user_id: Telegram user ID
-            all_series: List of all available series
+            all_series: List of all available series MediaEntity objects
             limit: Maximum recommendations
 
         Returns:
-            List of recommended series
+            List of recommended series MediaEntity objects
         """
         # Simple recommendation: suggest series with similar genres
         watched_series_ids = await self.get_watching_series(user_id)

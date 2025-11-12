@@ -2,17 +2,68 @@
 
 import asyncio
 import logging
+from pathlib import Path
 import re
 from urllib.parse import quote
 
 import aiohttp
-from bs4 import BeautifulSoup
-
-from app.config import Config
-from app.library.models import TorrentSearchResult, VideoQuality
 from py_rutracker import AsyncRuTrackerClient
 
+from app.config import Config
+from app.library.models import VideoQuality, DownloadIMDbMetadata
+
+from dataclasses import dataclass
+
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TorrentSearchResult:
+    """Torrent search result model."""
+
+    title: str
+    magnet_link: str | None
+    torrent_file_link: str | None
+    size: str
+    seeders: int
+    leechers: int
+    source: str
+    quality: VideoQuality
+
+    async def fetch_torrent_file(self) -> Path:
+        raise NotImplementedError("Subclasses must implement this method")
+
+
+class RuTrackerTorrentSearchResult(TorrentSearchResult):
+    def __init__(self, config: Config, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.config = config
+        self.downloaded_torrent_file_path: Path | None = None
+
+    async def fetch_torrent_file(self) -> Path:
+        if self.downloaded_torrent_file_path is not None:
+            return self.downloaded_torrent_file_path
+
+        if self.torrent_file_link is None:
+            raise ValueError("Torrent file link is not set")
+
+        if (
+            self.config.tracker.username is None
+            or self.config.tracker.password is None
+        ):
+            raise ValueError("RuTracker credentials are not set")
+
+        async with AsyncRuTrackerClient(
+            self.config.tracker.username,
+            self.config.tracker.password,
+            self.config.tracker.proxy or "",
+        ) as client:
+            content = await client.download(self.torrent_file_link)
+            temp_dir = Path("/tmp")
+            temp_file = temp_dir / f"torrent_search_{hash(self.torrent_file_link)}.torrent"
+            temp_file.write_bytes(content)
+            self.downloaded_torrent_file_path = temp_file
+            return temp_file
 
 
 class TorrentSearcher:
@@ -26,7 +77,7 @@ class TorrentSearcher:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
 
-    async def search(self, provider: str, query: str, limit: int = 20) -> list[TorrentSearchResult]:
+    async def search(self, provider: str, query: DownloadIMDbMetadata, limit: int = 20) -> list[TorrentSearchResult]:
         """Search for torrents across multiple sources.
 
         Args:
@@ -40,9 +91,9 @@ class TorrentSearcher:
 
         # Search multiple sources in parallel
         tasks = []
-        if provider == 'yts':
+        if provider == "yts":
             tasks.append(self._search_yts(query, limit))
-        elif provider == 'rutracker':
+        elif provider == "rutracker":
             tasks.append(self._search_tracker(query, limit))
 
         results = []
@@ -51,19 +102,19 @@ class TorrentSearcher:
 
             for source_results in search_results:
                 if isinstance(source_results, Exception):
-                    logger.error(f"Search error: {source_results}")
-                    continue
+                    raise source_results
                 if isinstance(source_results, list):
                     results.extend(source_results)
 
         except Exception as e:
-            logger.error(f"Error during parallel search: {e}")
+            logger.error(f"Error during search: {e}")
+            raise
 
         # Sort by seeders (descending) and return top results
         results.sort(key=lambda x: x.seeders, reverse=True)
         return results[:limit]
 
-    async def _search_yts(self, query: str, limit: int) -> list[TorrentSearchResult]:
+    async def _search_yts(self, query: DownloadIMDbMetadata, limit: int) -> list[TorrentSearchResult]:
         """Search YTS.mx using their API.
 
         Args:
@@ -74,7 +125,7 @@ class TorrentSearcher:
             List of search results
         """
         results = []
-        encoded_query = quote(query)
+        encoded_query = quote(str(query))
         url = f"https://yts.mx/api/v2/list_movies.json?query_term={encoded_query}&limit={limit}"
 
         try:
@@ -138,6 +189,7 @@ class TorrentSearcher:
 
         except Exception as e:
             logger.error(f"Error searching YTS: {e}")
+            raise
 
         logger.info(f"Found {len(results)} results from YTS")
         return results
@@ -159,8 +211,31 @@ class TorrentSearcher:
         }
         return quality_map.get(yts_quality, VideoQuality.UNKNOWN)
 
-    async def _search_tracker(self, query: str, limit: int) -> list[TorrentSearchResult]:
+    def _generate_russian_query(self, query: DownloadIMDbMetadata) -> str:
+        """Generate Russian query by replacing English keywords with Russian equivalents.
+
+        Args:
+            query: Download metadata object
+
+        Returns:
+            Query string with Russian keywords
+        """
+        # Convert query to string using its __str__ method
+        query_str = str(query)
+
+        # Replace English keywords with Russian equivalents
+        query_str = query_str.replace(" season ", " сезон ")
+        query_str = query_str.replace(" episode ", " серия ")
+
+        return query_str
+
+    async def _search_tracker(self, query: DownloadIMDbMetadata, limit: int) -> list[TorrentSearchResult]:
         results = []
+
+        # Generate Russian query for RuTracker (replace English keywords with Russian)
+        search_query = self._generate_russian_query(query)
+        logger.info(f"Generated Russian query for RuTracker: {search_query}")
+
         try:
             # Check environment variables directly in case credentials were updated
             import os
@@ -172,24 +247,31 @@ class TorrentSearcher:
                 logger.error("RuTracker credentials not configured. Please set TRACKER_USERNAME and TRACKER_PASSWORD.")
                 return results
             
-            async with AsyncRuTrackerClient(username, password, proxy) as client:
-                raw_results = await client.search_all_pages(query)
-                
+            async with AsyncRuTrackerClient(
+                username,
+                password,
+                self.config.tracker.proxy or "",
+            ) as client:
+                raw_results = await client.search_all_pages(search_query)
+
                 for result in raw_results:
-                    results.append(TorrentSearchResult(
-                        title=result.title,
-                        magnet_link=None,
-                        torrent_file_link=result.download_url,
-                        size=f"{result.size} {result.unit}",
-                        seeders=result.seedmed,
-                        leechers=result.leechmed,
-                        upload_date=result.added,
-                        source='RuTracker',
-                        quality=self._detect_quality(result.title),
-                    ))
-                    
+                    results.append(
+                        RuTrackerTorrentSearchResult(
+                            config=self.config,
+                            title=result.title,
+                            magnet_link=None,
+                            torrent_file_link=result.download_url,
+                            size=f"{result.size} {result.unit}",
+                            seeders=result.seedmed,
+                            leechers=result.leechmed,
+                            source="RuTracker",
+                            quality=self._detect_quality(result.title),
+                        )
+                    )
+
         except Exception as e:
             logger.error(f"Error searching RuTracker: {e}")
+            raise
         logger.info(f"Found {len(results)} results from RuTracker")
         return results
 
@@ -214,28 +296,3 @@ class TorrentSearcher:
             return VideoQuality.SD
 
         return VideoQuality.UNKNOWN
-
-    def _parse_size_to_bytes(self, size_str: str) -> int | None:
-        """Parse size string to bytes.
-
-        Args:
-            size_str: Size string (e.g., "1.5 GB", "700 MB")
-
-        Returns:
-            Size in bytes or None
-        """
-        try:
-            match = re.match(r"([\d.]+)\s*([KMGT])i?B", size_str, re.IGNORECASE)
-            if not match:
-                return None
-
-            value = float(match.group(1))
-            unit = match.group(2).upper()
-
-            multipliers = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
-
-            return int(value * multipliers.get(unit, 1))
-
-        except Exception:
-            return None
-

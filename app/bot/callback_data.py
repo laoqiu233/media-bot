@@ -32,10 +32,20 @@ LIBRARY_MOVIES_NEXT = "library:movies_next:"
 LIBRARY_SCAN = "library:scan:"
 LIBRARY_FILTER = "library:filter:"
 LIBRARY_CLEAR_FILTER = "library:clear_filter:"
-LIBRARY_VIEW_MOVIE = "library:view_movie:"  # Followed by movie_id
-LIBRARY_PLAY_MOVIE = "library:play_movie:"  # Followed by movie_id
-LIBRARY_DELETE_MOVIE = "library:delete_movie:"  # Followed by movie_id
-LIBRARY_CONFIRM_DELETE = "library:confirm_delete:"  # Followed by movie_id
+LIBRARY_VIEW_MOVIE = "library:view_movie:"  # Followed by movie_id (legacy)
+LIBRARY_PLAY_MOVIE = "library:play_movie:"  # Followed by movie_id (legacy)
+LIBRARY_DELETE_MOVIE = "library:delete_movie:"  # Followed by movie_id (legacy)
+LIBRARY_CONFIRM_DELETE = "library:confirm_delete:"  # Followed by movie_id (legacy)
+LIBRARY_VIEW_ENTITY = "library:view_entity:"  # Followed by entity_id
+LIBRARY_SELECT_FILE = "library:select_file:"  # Followed by file_id
+LIBRARY_VIEW_SERIES_SEASONS = "library:view_series_seasons:"  # Followed by series_id
+LIBRARY_VIEW_SEASON_EPISODES = "library:view_season_episodes:"  # Followed by season_id
+LIBRARY_VIEW_EPISODE = "library:view_episode:"  # Followed by episode_id
+LIBRARY_PLAY_FILE = "library:play_file:"  # Followed by file_id
+LIBRARY_DELETE_ENTITY = "library:delete_entity:"  # Followed by entity_id
+LIBRARY_DOWNLOAD_EPISODE = "library:download_episode:"  # Followed by episode_id
+LIBRARY_DOWNLOAD_SEASON = "library:download_season:"  # Followed by season_id
+LIBRARY_DOWNLOAD_SERIES = "library:download_series:"  # Followed by series_id
 
 # Player screen callbacks
 PLAYER_BACK = "player:back:"
@@ -96,6 +106,19 @@ MOVIE_NEXT = "movie:next:"
 MOVIE_PREV = "movie:prev:"
 MOVIE_BACK = "movie:back:"
 
+MOVIE_SELECT_SEASON = "movie:select_season:"  # Followed by season index
+MOVIE_SELECT_EPISODE = "movie:select_episode:"  # Followed by episode index
+
+MOVIE_SEASONS_BACK = "movie:seasons_back:"
+MOVIE_SEASONS_PREV = "movie:seasons_prev:"
+MOVIE_SEASONS_NEXT = "movie:seasons_next:"
+MOVIE_DOWNLOAD_SEASON = "movie:download_season:"  # Followed by season index
+
+MOVIE_EPISODES_BACK = "movie:episodes_back:"
+MOVIE_EPISODES_PREV = "movie:episodes_prev:"
+MOVIE_EPISODES_NEXT = "movie:episodes_next:"
+MOVIE_DOWNLOAD_SERIES = "movie:download_series:"  # Followed by series index
+
 # Torrent provider selection screen callbacks
 PROVIDER_SELECT = "provider:select:"  # Followed by provider name
 
@@ -104,6 +127,8 @@ TORRENT_SELECT = "torrent:select:"  # Followed by result index
 TORRENT_NEXT = "torrent:next:"
 TORRENT_PREV = "torrent:prev:"
 TORRENT_BACK = "torrent:back:"
+TORRENT_DOWNLOAD_CONFIRM = "torrent:download_confirm:"  # Confirm download after validation warning
+TORRENT_DOWNLOAD_CANCEL = "torrent:download_cancel:"  # Cancel download after validation warning
 
 # RuTracker authorization screen callbacks
 RUTRACKER_AUTH_BACK = "rutracker_auth:back:"

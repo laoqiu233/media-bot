@@ -15,14 +15,16 @@ from app.bot.screens import (
     StatusScreen,
     SystemControlScreen,
     TorrentProvidersScreen,
-    TorrentResultsScreen,
+    TorrentScreen,
     TVScreen,
 )
 from app.library.imdb_client import IMDbClient
 from app.library.manager import LibraryManager
 from app.player.mpv_controller import MPVController
 from app.torrent.downloader import TorrentDownloader
+from app.torrent.metadata_fetcher import TorrentMetadataFetcher
 from app.torrent.searcher import TorrentSearcher
+from app.torrent.validator import TorrentValidator
 from app.tv.hdmi_cec import CECController
 
 
@@ -36,12 +38,16 @@ class ScreenRegistry:
         torrent_downloader: TorrentDownloader,
         imdb_client: IMDbClient,
     ):
+        # Initialize torrent metadata fetcher and validator
+        metadata_fetcher = TorrentMetadataFetcher(torrent_downloader.session)
+        validator = TorrentValidator(metadata_fetcher, imdb_client)
+
         self.main_menu = MainMenuScreen()
         self.search_screen = SearchScreen(imdb_client)
         self.movie_selection_screen = MovieSelectionScreen(imdb_client)
         self.torrent_providers_screen = TorrentProvidersScreen()
-        self.torrent_results_screen = TorrentResultsScreen(torrent_searcher, torrent_downloader)
         self.rutracker_auth_screen = RuTrackerAuthScreen()
+        self.torrent_screen = TorrentScreen(torrent_searcher, torrent_downloader, validator)
         self.library_screen = LibraryScreen(library_manager, mpv_controller)
         self.downloads_screen = DownloadsScreen(torrent_downloader)
         self.player_screen = PlayerScreen(mpv_controller, cec_controller)
@@ -58,8 +64,8 @@ class ScreenRegistry:
             self.search_screen,
             self.movie_selection_screen,
             self.torrent_providers_screen,
-            self.torrent_results_screen,
             self.rutracker_auth_screen,
+            self.torrent_screen,
             self.library_screen,
             self.downloads_screen,
             self.player_screen,
