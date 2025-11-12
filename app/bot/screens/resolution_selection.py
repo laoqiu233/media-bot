@@ -1,7 +1,8 @@
-"""Resolution selection screen."""
+"""Resolution selection screen using xrandr."""
 
 import asyncio
 import logging
+import re
 import subprocess
 
 from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
@@ -18,125 +19,213 @@ from app.bot.screens.base import (
 
 logger = logging.getLogger(__name__)
 
-# Common resolutions for Raspberry Pi
-COMMON_RESOLUTIONS = [
-    ("1920x1080", "1080p (Full HD)"),
-    ("1280x720", "720p (HD)"),
-    ("3840x2160", "4K (UHD)"),
-    ("2560x1440", "1440p (QHD)"),
-    ("1600x900", "900p"),
-    ("1366x768", "768p"),
-    ("1024x768", "XGA"),
-]
+
+class DisplayMode:
+    """Represents a display resolution mode."""
+
+    def __init__(self, resolution: str, refresh_rate: str | None = None, current: bool = False):
+        """Initialize display mode.
+
+        Args:
+            resolution: Resolution string (e.g., "1920x1080")
+            refresh_rate: Refresh rate (e.g., "60.00")
+            current: Whether this is the current active mode
+        """
+        self.resolution = resolution
+        self.refresh_rate = refresh_rate
+        self.current = current
+
+    def __str__(self) -> str:
+        """Get string representation."""
+        if self.refresh_rate:
+            return f"{self.resolution}@{self.refresh_rate}Hz"
+        return self.resolution
 
 
-async def _get_current_resolution() -> str | None:
-    """Get current display resolution.
+async def _get_connected_display() -> tuple[str | None, str | None]:
+    """Get connected display output name and current resolution.
 
     Returns:
-        Current resolution string (e.g., "1920x1080") or None
+        Tuple of (output_name, current_resolution) or (None, None)
     """
     try:
         loop = asyncio.get_event_loop()
-
-        # Try tvservice first (Raspberry Pi specific)
         result = await loop.run_in_executor(
-            None,
-            lambda: subprocess.run(
-                ["tvservice", "-s"],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=2,
-            ),
-        )
-
-        if result.returncode == 0 and result.stdout:
-            # Parse output like "state 0x120009 [HDMI CEA (16) RGB lim 16:9], 1920x1080 @ 60Hz"
-            output = result.stdout
-            if "x" in output:
-                import re
-
-                match = re.search(r"(\d+)x(\d+)", output)
-                if match:
-                    return f"{match.group(1)}x{match.group(2)}"
-
-        # Try xrandr (if X11 is running)
-        result2 = await loop.run_in_executor(
             None,
             lambda: subprocess.run(
                 ["xrandr"],
                 check=False,
                 capture_output=True,
                 text=True,
-                timeout=2,
+                timeout=5,
             ),
         )
 
-        if result2.returncode == 0 and result2.stdout:
-            for line in result2.stdout.splitlines():
-                if " connected " in line and "x" in line:
-                    parts = line.split()
-                    for part in parts:
-                        if "x" in part and part[0].isdigit():
-                            return part
+        if result.returncode != 0:
+            logger.warning(f"xrandr failed: {result.stderr}")
+            return None, None
 
-        return None
+        current_output = None
+        current_resolution = None
 
+        for line in result.stdout.splitlines():
+            # Look for connected output line like:
+            # HDMI-1 connected primary 1920x1080+0+0 (normal left inverted right x axis y axis) 509mm x 286mm
+            if " connected " in line:
+                parts = line.split()
+                if len(parts) >= 2:
+                    output_name = parts[0]
+                    # Check if it's connected (not disconnected)
+                    if "disconnected" not in line.lower():
+                        current_output = output_name
+
+                        # Find current resolution in the line
+                        # Format: "HDMI-1 connected primary 1920x1080+0+0 ..."
+                        for part in parts:
+                            # Look for resolution pattern like "1920x1080" or "1920x1080+0+0"
+                            if "x" in part and part[0].isdigit():
+                                # Remove position offsets (+0+0)
+                                res_part = part.split("+")[0]
+                                if re.match(r"\d+x\d+", res_part):
+                                    current_resolution = res_part
+                                    break
+
+                        break
+
+        return current_output, current_resolution
+
+    except FileNotFoundError:
+        logger.warning("xrandr utility not found. Install with: sudo apt install x11-xserver-utils")
     except Exception as e:
-        logger.debug(f"Error getting current resolution: {e}")
-        return None
+        logger.error(f"Error getting connected display: {e}")
+        return None, None
 
 
-async def _set_resolution(resolution: str) -> tuple[bool, str]:
-    """Set display resolution.
+async def _get_available_resolutions(output_name: str) -> list[DisplayMode]:
+    """Get available resolutions for a display output.
 
     Args:
+        output_name: Display output name (e.g., "HDMI-1")
+
+    Returns:
+        List of available display modes
+    """
+    modes = []
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                ["xrandr"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ),
+        )
+
+        if result.returncode != 0:
+            return modes
+
+        # Parse xrandr output to find modes for the specified output
+        in_output_section = False
+        current_resolution = None
+
+        for line in result.stdout.splitlines():
+            # Check if we're in the section for this output
+            if line.startswith(output_name):
+                in_output_section = True
+                # Extract current resolution from the output line
+                # Format: "HDMI-1 connected primary 1920x1080+0+0 ..."
+                parts = line.split()
+                for part in parts:
+                    if "x" in part and part[0].isdigit():
+                        res_part = part.split("+")[0]
+                        if re.match(r"\d+x\d+", res_part):
+                            current_resolution = res_part
+                            break
+                continue
+
+            # If we hit another output, stop parsing
+            if in_output_section and re.match(r"^\w+-\d+", line):
+                break
+
+            # Parse mode lines (indented with spaces)
+            if in_output_section and line.startswith("   "):
+                # Format: "   1920x1080     60.00*+"
+                # or:     "   1920x1080     60.00 +"
+                # or:     "   1920x1080     60.00"
+                line = line.strip()
+                parts = re.split(r"\s+", line)
+
+                if len(parts) >= 1:
+                    resolution = parts[0]
+                    # Check if it's a valid resolution format
+                    if re.match(r"\d+x\d+", resolution):
+                        refresh_rate = None
+                        is_current = False
+
+                        # Check for refresh rate and current indicator
+                        if len(parts) >= 2:
+                            refresh_part = parts[1]
+                            # Remove * (current) and + (preferred) indicators
+                            refresh_rate = refresh_part.replace("*", "").replace("+", "").strip()
+                            is_current = "*" in refresh_part
+
+                        # Use current resolution from output line if available
+                        if resolution == current_resolution:
+                            is_current = True
+
+                        modes.append(DisplayMode(resolution, refresh_rate, is_current))
+
+        # Sort modes: current first, then by resolution (largest first)
+        modes.sort(key=lambda m: (not m.current, -int(m.resolution.split("x")[0])), reverse=False)
+
+    except Exception as e:
+        logger.error(f"Error getting available resolutions: {e}")
+
+    return modes
+
+
+async def _set_resolution(output_name: str, resolution: str) -> tuple[bool, str]:
+    """Set display resolution using xrandr.
+
+    Args:
+        output_name: Display output name (e.g., "HDMI-1")
         resolution: Resolution string (e.g., "1920x1080")
 
     Returns:
         Tuple of (success, message)
     """
     try:
-        width, height = map(int, resolution.split("x"))
+        loop = asyncio.get_event_loop()
 
-        # For Raspberry Pi, we need to modify /boot/config.txt
-        # This requires sudo and is risky, so we'll provide instructions
-        # Format: hdmi_group=2 hdmi_mode=XX (for CEA modes) or hdmi_group=1 hdmi_mode=XX (for DMT modes)
-
-        # Common CEA modes:
-        # 16: 1920x1080 60Hz
-        # 4: 1280x720 60Hz
-        # 97: 3840x2160 60Hz
-
-        mode_map = {
-            "1920x1080": "hdmi_group=2\nhdmi_mode=16",
-            "1280x720": "hdmi_group=2\nhdmi_mode=4",
-            "3840x2160": "hdmi_group=2\nhdmi_mode=97",
-        }
-
-        config_lines = mode_map.get(
-            resolution,
-            f"# Add custom resolution:\n# hdmi_group=2\n# hdmi_mode=<mode_number>\n# For {width}x{height}, find appropriate mode in CEA or DMT table",
+        # Use xrandr to set the resolution
+        # Format: xrandr --output <output> --mode <resolution>
+        result = await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                ["xrandr", "--output", output_name, "--mode", resolution],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ),
         )
 
-        message = (
-            f"To set resolution to {resolution}, edit `/boot/config.txt` and add:\n\n"
-            f"```\n{config_lines}\n```\n\n"
-            "Then reboot the system.\n\n"
-            "Note: Some resolutions may require specific HDMI modes. "
-            "Check Raspberry Pi documentation for available modes."
-        )
-
-        return False, message
+        if result.returncode == 0:
+            return True, f"Resolution changed to {resolution}"
+        else:
+            error_msg = result.stderr or result.stdout or "Unknown error"
+            return False, f"Failed to set resolution: {error_msg.strip()}"
 
     except Exception as e:
-        logger.error(f"Error setting resolution: {e}")
+        logger.error(f"Error setting resolution: {e}", exc_info=True)
         return False, f"Error: {str(e)}"
 
 
 class ResolutionSelectionScreen(Screen):
-    """Screen for selecting display resolution."""
+    """Screen for selecting display resolution using xrandr."""
 
     def get_name(self) -> str:
         """Get screen name."""
@@ -151,22 +240,48 @@ class ResolutionSelectionScreen(Screen):
         Returns:
             Tuple of (text, keyboard, options)
         """
-        current_res = await _get_current_resolution()
+        output_name, current_res = await _get_connected_display()
 
         text = "🖥 *Resolution Selection*\n\n"
+
+        if not output_name:
+            text += "❌ No connected display detected.\n\n"
+            text += "Make sure:\n"
+            text += "• A display is connected via HDMI\n"
+            text += "• X server is running\n"
+            text += "• `xrandr` utility is installed (`sudo apt install x11-xserver-utils`)\n"
+            keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data=RESOLUTION_BACK)]]
+            return text, InlineKeyboardMarkup(keyboard), RenderOptions()
+
+        text += f"Display: *{output_name}*\n"
         if current_res:
             text += f"Current resolution: *{current_res}*\n\n"
         else:
             text += "Current resolution: Unknown\n\n"
 
-        text += "Select display resolution:\n\n"
-        text += "⚠️ *Note*: Changing resolution requires editing `/boot/config.txt` and rebooting.\n"
-        text += "The bot will provide instructions after selection."
+        # Get available resolutions
+        modes = await _get_available_resolutions(output_name)
+
+        if not modes:
+            text += "⚠️ No available resolutions found.\n"
+            text += "The display may not support resolution querying."
+            keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data=RESOLUTION_BACK)]]
+            return text, InlineKeyboardMarkup(keyboard), RenderOptions()
+
+        text += "Available resolutions:\n"
 
         keyboard = []
-        for res, label in COMMON_RESOLUTIONS:
+        for mode in modes:
+            button_text = str(mode)
+            if mode.current:
+                button_text = f"✓ {button_text} (Current)"
+
             keyboard.append(
-                [InlineKeyboardButton(f"{res} ({label})", callback_data=f"{RESOLUTION_SELECT}{res}")]
+                [
+                    InlineKeyboardButton(
+                        button_text, callback_data=f"{RESOLUTION_SELECT}{output_name}:{mode.resolution}"
+                    )
+                ]
             )
 
         keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data=RESOLUTION_BACK)])
@@ -191,16 +306,22 @@ class ResolutionSelectionScreen(Screen):
             return Navigation(next_screen="system_control")
 
         elif query.data.startswith(RESOLUTION_SELECT):
-            resolution = query.data[len(RESOLUTION_SELECT) :]
-            success, message = await _set_resolution(resolution)
+            # Format: "resolution:select:HDMI-1:1920x1080"
+            data = query.data[len(RESOLUTION_SELECT) :]
+            parts = data.split(":")
+            if len(parts) >= 2:
+                output_name = parts[0]
+                resolution = parts[1]
+                success, message = await _set_resolution(output_name, resolution)
 
-            if success:
-                await query.answer(f"Resolution set to {resolution}")
+                if success:
+                    await query.answer(f"Resolution set to {resolution}")
+                else:
+                    await query.answer(message, show_alert=True)
+
+                # Return to system control after showing message
+                return Navigation(next_screen="system_control")
             else:
-                await query.answer(message, show_alert=True)
-
-            # Return to system control after showing message
-            return Navigation(next_screen="system_control")
+                await query.answer("Invalid resolution data", show_alert=True)
 
         return None
-
