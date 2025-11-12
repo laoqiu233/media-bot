@@ -33,6 +33,7 @@ class MPVController:
             self._current_file: Path | None = None
             self._is_playing = False
             self._event_handlers: dict[str, list[Callable]] = {}
+            self._loading_proc: Any | None = None  # Process for displaying loading.gif
             self._initialized = True
 
     def initialize(
@@ -79,14 +80,22 @@ class MPVController:
             @self._player.event_callback("end-file")
             def end_file_callback(event):
                 self._is_playing = False
+                self._current_file = None
                 self._trigger_event("playback_finished", event)
+                # Show loading.gif when playback ends
+                asyncio.create_task(self._show_loading_gif())
 
             @self._player.event_callback("file-loaded")
             def file_loaded_callback(event):
                 self._is_playing = True
                 self._trigger_event("file_loaded", event)
+                # Hide loading.gif when file loads
+                asyncio.create_task(self._hide_loading_gif())
 
             logger.info("MPV player initialized successfully")
+            
+            # Show loading.gif initially when player is idle
+            asyncio.create_task(self._show_loading_gif())
 
         except Exception as e:
             logger.error(f"Failed to initialize MPV player: {e}")
@@ -94,6 +103,15 @@ class MPVController:
 
     def shutdown(self):
         """Shutdown the MPV player."""
+        # Hide loading.gif if showing
+        if self._loading_proc is not None:
+            try:
+                self._loading_proc.terminate()
+                self._loading_proc.wait(timeout=2)
+            except Exception:
+                pass
+            self._loading_proc = None
+        
         if self._player:
             try:
                 self._player.terminate()
@@ -125,6 +143,9 @@ class MPVController:
 
         try:
             async with self._lock:
+                # Hide loading.gif when starting playback
+                await self._hide_loading_gif()
+                
                 logger.info(f"Starting playback of: {file_path}")
                 logger.info(f"File size: {file_path.stat().st_size / (1024*1024):.2f} MB")
 
@@ -214,6 +235,8 @@ class MPVController:
             self._is_playing = False
             self._current_file = None
             logger.info("Playback stopped")
+            # Show loading.gif when stopped
+            await self._show_loading_gif()
             return True
         except Exception as e:
             logger.error(f"Error stopping playback: {e}")
@@ -482,6 +505,51 @@ class MPVController:
                     handler(data)
                 except Exception as e:
                     logger.error(f"Error in event handler for {event}: {e}")
+
+    async def _show_loading_gif(self) -> None:
+        """Display loading.gif on TV when no media is playing."""
+        if self._loading_proc is not None:
+            return  # Already showing
+        
+        try:
+            import subprocess
+            from pathlib import Path
+            
+            # Find project root (assuming this file is in app/player/)
+            project_root = Path(__file__).resolve().parents[2]
+            loading_path = project_root / "loading.gif"
+            
+            if not loading_path.exists():
+                logger.debug("loading.gif not found, skipping display")
+                return
+            
+            # Display loading.gif with mpv (similar to QR code display)
+            cmd = [
+                "mpv",
+                "--no-terminal",
+                "--force-window=yes",
+                "--image-display-duration=inf",
+                "--loop-file=inf",
+                "--fs",
+                str(loading_path),
+            ]
+            self._loading_proc = subprocess.Popen(
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            logger.info("Displaying loading.gif on TV (media loading...)")
+        except Exception as e:
+            logger.debug(f"Could not display loading.gif: {e}")
+
+    async def _hide_loading_gif(self) -> None:
+        """Hide loading.gif when media starts playing."""
+        if self._loading_proc is not None:
+            try:
+                self._loading_proc.terminate()
+                self._loading_proc.wait(timeout=2)
+            except Exception as e:
+                logger.debug(f"Error hiding loading.gif: {e}")
+            finally:
+                self._loading_proc = None
 
 
 # Global player instance

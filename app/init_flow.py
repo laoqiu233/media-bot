@@ -74,7 +74,7 @@ def _detect_wifi_interface() -> str | None:
             text=True,
         )
         if proc.returncode == 0 and proc.stdout:
-            for line in proc.stdout.strip().splitlines():
+            for line in proc.stdout.splitlines():
                 parts = line.split(":")
                 if len(parts) >= 2:
                     dev, typ = parts[0], parts[1]
@@ -168,14 +168,14 @@ async def _start_web_server(
             
             if scan_result.returncode == 0 and scan_result.stdout:
                 seen_ssids = set()
-                for line in scan_result.stdout.strip().splitlines():
+                for line in scan_result.stdout.splitlines():
                     parts = line.split(":")
                     if len(parts) >= 2:
-                        ssid = parts[0].strip()
+                        ssid = parts[0]
                         if ssid and ssid != "--" and ssid not in seen_ssids:
                             seen_ssids.add(ssid)
-                            signal = parts[1].strip() if len(parts) > 1 else "0"
-                            security = parts[2].strip() if len(parts) > 2 else ""
+                            signal = (parts[1] if len(parts) > 1 else "0")
+                            security = (parts[2] if len(parts) > 2 else "")
                             networks.append({
                                 "ssid": ssid,
                                 "signal": signal,
@@ -197,13 +197,14 @@ async def _start_web_server(
         html_content = _render_template("setup_success.html")
         return web.Response(text=html_content, content_type="text/html")
 
+
     async def handle_submit(request: web.Request) -> web.Response:
         data = await request.post()
         token = (data.get("token") or "")
         wifi_ssid = (data.get("wifi_ssid") or "")
         wifi_password = (data.get("wifi_password") or "")
         
-        # Validate input
+        # Validate input (after stripping)
         if wifi_ssid == '' or wifi_password == '' or token == '':
             error_html = "<div class=\"error\">All fields are required.</div>"
             html_content = _render_template(
@@ -254,6 +255,18 @@ async def _start_web_server(
             status=200
         )
 
+    async def handle_loading_gif(_request: web.Request) -> web.Response:
+        """Serve loading.gif from project root for HTML templates."""
+        loading_path = _project_root() / "loading.gif"
+        if loading_path.exists():
+            return web.Response(
+                body=loading_path.read_bytes(),
+                content_type="image/gif"
+            )
+        else:
+            # Return 404 if file doesn't exist
+            return web.Response(status=404)
+    
     app = web.Application(middlewares=[log_requests])
     app.router.add_get("/", handle_index)
     app.router.add_post("/ap-continue", handle_ap_continue)
@@ -261,6 +274,7 @@ async def _start_web_server(
     app.router.add_get("/status", handle_status)
     app.router.add_get("/success", handle_success)
     app.router.add_get("/scan-wifi", handle_scan_wifi)
+    app.router.add_get("/loading.gif", handle_loading_gif)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -292,7 +306,10 @@ def _render_template(template_name: str, **replacements: str) -> str:
 
 
 def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_path: Path) -> None:
-    """Create a stunningly beautiful composite image with two QRs optimized for mobile scanning."""
+    """Create a stunningly beautiful composite image with two QRs optimized for mobile scanning.
+    
+    Also includes loading.gif in the corner to indicate waiting for WiFi connection.
+    """
     # Generate QR codes with high error correction for mobile scanning
     qr_factory = qrcode.QRCode(
         version=1,
@@ -592,6 +609,36 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     img.paste(wifi_qr, (wifi_qr_x, qr_y))
     img.paste(url_qr, (url_qr_x, qr_y))
     
+    # Add loading.gif in bottom corner if available (for TV display)
+    loading_path = _project_root() / "loading.gif"
+    if loading_path.exists():
+        try:
+            loading_img = Image.open(loading_path)
+            # Convert to RGB if needed
+            if loading_img.mode != "RGB":
+                loading_img = loading_img.convert("RGB")
+            # Resize loading.gif to reasonable size (about 120x120)
+            loading_size = 120
+            loading_img = loading_img.resize((loading_size, loading_size), Image.Resampling.LANCZOS)
+            # Position in bottom-right corner with padding
+            loading_x = width - loading_size - padding
+            loading_y = height - loading_size - padding
+            # Paste loading.gif
+            img.paste(loading_img, (loading_x, loading_y))
+            
+            # Add "Waiting for WiFi connection..." text near loading.gif
+            loading_text = "Waiting for WiFi connection..."
+            loading_text_bbox = draw.textbbox((0, 0), loading_text, font=font_text)
+            loading_text_width = loading_text_bbox[2] - loading_text_bbox[0]
+            loading_text_x = loading_x + (loading_size - loading_text_width) // 2
+            loading_text_y = loading_y - 35
+            # Text shadow
+            draw.text((loading_text_x + 1, loading_text_y + 1), loading_text, fill=(0, 0, 0), font=font_text)
+            # Main text
+            draw.text((loading_text_x, loading_text_y), loading_text, fill=(148, 220, 255), font=font_text)
+        except Exception as e:
+            print(f"[init] Could not add loading.gif to QR screen: {e}")
+    
     # Stunning text below QR codes with glow effects
     text_y = qr_y + qr_size + section_padding
     wifi_text = f"SSID: {ap_ssid}\nPassword: {ap_password}"
@@ -685,7 +732,7 @@ def _append_or_replace_env_line(lines: list[str], key: str, value: str) -> list[
     new_lines: list[str] = []
     found = False
     for line in lines:
-        if line.strip().startswith(f"{key}="):
+        if line.startswith(f"{key}="):
             new_lines.append(f"{key}={value}\n")
             found = True
         else:
@@ -732,7 +779,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
         )
         
         if connect_result.returncode != 0:
-            error = connect_result.stderr.strip() or "Failed to connect to the provided Wi‑Fi network."
+            error = (connect_result.stderr if connect_result.stderr else "") or "Failed to connect to the provided Wi‑Fi network."
             print(f"[init] Wi‑Fi connect failed: {error}")
             # Make sure hotspot stays active so the user can retry
             print("Reconnecting after wrong creds\n", "sudo", "nmcli", "dev", "wifi", "hotspot", "ifname", wifi_iface, "ssid", current_ap_ssid, "password", current_ap_password)
@@ -800,12 +847,12 @@ async def ensure_telegram_token(force: bool = False) -> None:
                 text=True,
             )
             if result.returncode != 0:  
-                error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+                error_msg = result.stderr or result.stdout or "Unknown error"
                 print(f"[init] FATAL: Failed to create hotspot: {error_msg}")
                 print("[init] Cannot continue without hotspot. Exiting application.")
                 sys.exit(1)
             else:
-                print(f"[init] nmcli hotspot started: {result.stdout.strip()}")
+                print(f"[init] nmcli hotspot started: {result.stdout}")
                 con_name = None
                 con_list = subprocess.run(
                     ["sudo", "nmcli", "-t", "-f", "NAME,DEVICE,TYPE", "con", "show", "--active"],
@@ -814,7 +861,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
                     text=True,
                 )
                 if con_list.returncode == 0 and con_list.stdout:
-                    for line in con_list.stdout.strip().splitlines():
+                    for line in con_list.stdout.splitlines():
                         parts = line.split(":")
                         if len(parts) >= 3:
                             name, dev, typ = parts[0], parts[1], parts[2]
@@ -861,7 +908,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
                     r = subprocess.run(args, check=False, capture_output=True, text=True)
                     if r.returncode != 0:
                         print(
-                            f"[init] nmcli modify warn: {' '.join(args[3:])} -> {r.stderr.strip()}"
+                            f"[init] nmcli modify warn: {' '.join(args[3:])} -> {r.stderr}"
                         )
                 # Reload the connection to apply changes
                 r1 = subprocess.run(
@@ -871,9 +918,9 @@ async def ensure_telegram_token(force: bool = False) -> None:
                     ["sudo", "nmcli", "con", "up", con_name], check=False, capture_output=True, text=True
                 )
                 if r1.returncode != 0:
-                    print(f"[init] nmcli down warn: {r1.stderr.strip()}")
+                    print(f"[init] nmcli down warn: {r1.stderr}")
                 if r2.returncode != 0:
-                    print(f"[init] nmcli up warn: {r2.stderr.strip()}")
+                    print(f"[init] nmcli up warn: {r2.stderr}")
         except Exception as e:
             print(f"Error creating hotspot: {e}")
             pass
@@ -896,6 +943,10 @@ async def ensure_telegram_token(force: bool = False) -> None:
             runner, bound_port = await _start_web_server("0.0.0.0", 0, on_token_saved, current_ap_ssid, current_ap_password)
         setup_url = f"http://{ap_ip}:{bound_port}/"
         print(setup_url)
+        
+        # Store setup server info for loading.gif access
+        os.environ["SETUP_SERVER_PORT"] = str(bound_port)
+        os.environ["SETUP_SERVER_HOST"] = ap_ip
         # Prepare QR image under project data dir
         project = _project_root()
         tmp_dir = project / ".setup"
