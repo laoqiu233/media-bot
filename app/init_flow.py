@@ -769,15 +769,15 @@ async def ensure_telegram_token(force: bool = False) -> None:
         return
     os.environ["MEDIA_BOT_SETUP_ACTIVE"] = "1"
 
-    # Start loading3.gif first to avoid gap
+    # Start loading.gif first to avoid gap (before QR code screen)
     loading_proc: subprocess.Popen | None = None
-    loading_path = _project_root() / "loading3.gif"
+    loading_path = _project_root() / "loading.gif"
     if loading_path.exists():
         try:
             loading_proc = await _display_with_mpv(loading_path)
-            print("[init] Showing loading3.gif...")
+            print("[init] Showing loading.gif...")
         except Exception as e:
-            print(f"[init] Could not show loading3.gif: {e}")
+            print(f"[init] Could not show loading.gif: {e}")
 
     host_ip = _detect_local_ip()
     desired_port = 8765
@@ -840,7 +840,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
         print("[init] Wi‑Fi connection established successfully.")
 
         # Don't close QR code screen here - let the main flow handle it
-        # This ensures loading3.gif is shown before closing the QR code screen
+        # The finally block will show loading3.gif before closing the QR code screen
 
         return True, None
 
@@ -910,7 +910,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
         setup_url = f"http://{ap_ip}:{bound_port}/"
         print(setup_url)
         
-        # Store setup server info for loading3.gif access
+        # Store setup server info
         os.environ["SETUP_SERVER_PORT"] = str(bound_port)
         os.environ["SETUP_SERVER_HOST"] = ap_ip
         
@@ -931,7 +931,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
                 # Give it just a tiny moment more to ensure it's fully rendered and visible
                 await asyncio.sleep(1.5)
                 
-                # NOW stop loading3.gif after QR code screen is confirmed loaded and visible
+                # NOW stop loading.gif after QR code screen is confirmed loaded and visible
                 # Do this immediately while we know mpv_proc is still running
                 if loading_proc is not None and mpv_proc.poll() is None:
                     try:
@@ -943,17 +943,17 @@ async def ensure_telegram_token(force: bool = False) -> None:
                         except asyncio.TimeoutError:
                             loading_proc.kill()
                             await asyncio.to_thread(loading_proc.wait)
-                        print("[init] Stopped loading3.gif after QR code screen loaded")
+                        print("[init] Stopped loading.gif after QR code screen loaded")
                     except Exception as e:
-                        print(f"[init] Error stopping loading3.gif: {e}")
+                        print(f"[init] Error stopping loading.gif: {e}")
                         try:
                             if loading_proc.poll() is None:
                                 loading_proc.kill()
                         except Exception:
                             pass
                 elif mpv_proc.poll() is not None:
-                    # QR code screen already closed (user submitted form), loading3.gif should stay
-                    print("[init] QR code screen already closed, keeping loading3.gif")
+                    # QR code screen already closed (user submitted form), will show loading3.gif in finally
+                    print("[init] QR code screen already closed")
             except FileNotFoundError:
                 mpv_failed = True
                 print(
@@ -965,23 +965,33 @@ async def ensure_telegram_token(force: bool = False) -> None:
             while not setup_completed:
                 await asyncio.sleep(0.5)
         finally:
-            # Stop QR code screen - keep existing loading3.gif running to avoid gaps
+            # Stop QR code screen - show loading3.gif before closing to avoid gaps
             if mpv_proc is not None:
                 try:
-                    # Ensure loading3.gif is running (reuse existing if already running)
-                    if loading_path.exists():
-                        if loading_proc is None or loading_proc.poll() is not None:
-                            # Only start if not already running
+                    # Stop the initial loading.gif if it's still running
+                    if loading_proc is not None and loading_proc.poll() is None:
+                        try:
+                            loading_proc.terminate()
                             try:
-                                loading_proc = await _display_with_mpv(loading_path)
-                                print("[init] Started loading3.gif before closing QR code screen")
-                                # Wait for loading3.gif to be fully visible
-                                await asyncio.sleep(1.5)
-                            except Exception as e:
-                                print(f"[init] Could not show loading3.gif: {e}")
-                        else:
-                            # Loading3.gif is already running, just ensure it's visible
-                            await asyncio.sleep(0.1)
+                                await asyncio.wait_for(
+                                    asyncio.to_thread(loading_proc.wait), timeout=0.5
+                                )
+                            except asyncio.TimeoutError:
+                                loading_proc.kill()
+                                await asyncio.to_thread(loading_proc.wait)
+                        except Exception:
+                            pass
+                    
+                    # Now show loading3.gif before closing QR code screen
+                    loading3_path = _project_root() / "loading3.gif"
+                    if loading3_path.exists():
+                        try:
+                            loading_proc = await _display_with_mpv(loading3_path)
+                            print("[init] Started loading3.gif before closing QR code screen")
+                            # Wait for loading3.gif to be fully visible
+                            await asyncio.sleep(1.5)
+                        except Exception as e:
+                            print(f"[init] Could not show loading3.gif: {e}")
                     
                     # Now close QR code screen (loading3.gif is already visible and covering it)
                     mpv_proc.terminate()
