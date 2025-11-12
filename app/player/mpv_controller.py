@@ -107,7 +107,7 @@ class MPVController:
 
     def shutdown(self):
         """Shutdown the MPV player."""
-        # Hide loading.gif if showing
+        # Terminate loading.gif only on shutdown
         if self._loading_proc is not None:
             try:
                 self._loading_proc.terminate()
@@ -151,6 +151,7 @@ class MPVController:
                 logger.info(f"File size: {file_path.stat().st_size / (1024*1024):.2f} MB")
 
                 # Load and play the file first (this will switch to video screen)
+                # Don't hide loading.gif - it will stay in background, video will be on top
                 self._player.loadfile(str(file_path))
                 self._current_file = file_path
 
@@ -159,13 +160,7 @@ class MPVController:
                 self._is_playing = True
 
                 # Give MPV a moment to start and switch to video
-                await asyncio.sleep(0.3)
-                
-                # Hide loading.gif after video screen is active (reduces gap)
-                await self._hide_loading_gif()
-                
-                # Additional small delay to ensure smooth transition
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.5)
 
                 # Verify playback actually started
                 try:
@@ -555,15 +550,14 @@ class MPVController:
             logger.debug(f"Could not display loading.gif: {e}")
 
     async def _hide_loading_gif(self) -> None:
-        """Hide loading.gif when media starts playing."""
-        if self._loading_proc is not None:
-            try:
-                self._loading_proc.terminate()
-                self._loading_proc.wait(timeout=2)
-            except Exception as e:
-                logger.debug(f"Error hiding loading.gif: {e}")
-            finally:
-                self._loading_proc = None
+        """Hide loading.gif when media starts playing.
+        
+        Note: We don't actually terminate it - just let it run in background.
+        The video/image will be on top, and loading.gif will be behind.
+        """
+        # Don't terminate - just let it run in background
+        # When video/image loads, it will naturally be on top
+        pass
 
 
 # Global player instance

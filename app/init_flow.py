@@ -305,11 +305,41 @@ def _render_template(template_name: str, **replacements: str) -> str:
     return re.sub(r"\{\{[A-Z0-9_]+\}\}", "", html)
 
 
-def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_path: Path) -> None:
-    """Create a stunningly beautiful composite image with two QRs optimized for mobile scanning.
+def _detect_screen_resolution() -> tuple[int, int]:
+    """Detect screen resolution, defaulting to 1920x1080 if detection fails."""
+    try:
+        # Try xrandr first (Linux/X11)
+        result = subprocess.run(
+            ["xrandr"], capture_output=True, text=True, timeout=2
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                if " connected " in line and "x" in line:
+                    # Parse resolution like "1920x1080"
+                    parts = line.split()
+                    for part in parts:
+                        if "x" in part and part[0].isdigit():
+                            try:
+                                w, h = map(int, part.split("x"))
+                                if w > 0 and h > 0:
+                                    return w, h
+                            except ValueError:
+                                continue
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+        pass
     
-    Also includes loading.gif in the corner to indicate waiting for WiFi connection.
+    # Default to 1920x1080 (common TV resolution)
+    return 1920, 1080
+
+
+def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_path: Path) -> None:
+    """Create a stunningly beautiful composite image with two QRs optimized for different display sizes.
+    
+    Automatically adapts to screen resolution for optimal display on TV and other screens.
     """
+    # Detect screen resolution for responsive design
+    screen_width, screen_height = _detect_screen_resolution()
+    
     # Generate QR codes with high error correction for mobile scanning
     qr_factory = qrcode.QRCode(
         version=1,
@@ -331,23 +361,37 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     qr_factory.make(fit=True)
     url_qr = qr_factory.make_image(fill_color="black", back_color="white").convert("RGB")
     
-    # Mobile-optimized sizing (larger QR codes for easier scanning)
-    qr_size = 520
+    # Responsive sizing based on screen resolution
+    # Use screen width as base, but ensure QR codes are large enough for scanning
+    base_size = min(screen_width, screen_height) * 0.25  # 25% of smaller dimension
+    qr_size = max(int(base_size), 400)  # Minimum 400px for scanning, scales up for TV
+    
+    # Scale QR codes
     url_qr = url_qr.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
     wifi_qr = wifi_qr.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
     
-    # Beautiful spacing and layout
-    padding = 60
-    section_padding = 40
-    title_height = 120
-    label_height = 70
-    text_height = 140
-    qr_spacing = 60
-    card_border = 20
-    shadow_offset = 12
+    # Responsive spacing and layout (scale with screen size)
+    scale_factor = min(screen_width / 1920, screen_height / 1080, 1.5)  # Cap at 1.5x
+    padding = int(60 * scale_factor)
+    section_padding = int(40 * scale_factor)
+    title_height = int(120 * scale_factor)
+    label_height = int(70 * scale_factor)
+    text_height = int(140 * scale_factor)
+    qr_spacing = int(60 * scale_factor)
+    card_border = int(20 * scale_factor)
+    shadow_offset = int(12 * scale_factor)
     
-    width = padding * 2 + qr_size * 2 + qr_spacing
-    height = padding * 2 + title_height + qr_size + label_height + text_height + section_padding
+    # Calculate layout - use full screen width/height
+    width = screen_width
+    height = screen_height
+    
+    # Center content vertically and horizontally
+    content_width = padding * 2 + qr_size * 2 + qr_spacing
+    content_height = padding * 2 + title_height + qr_size + label_height + text_height + section_padding
+    
+    # If content is smaller than screen, center it
+    offset_x = (width - content_width) // 2 if content_width < width else 0
+    offset_y = (height - content_height) // 2 if content_height < height else 0
     
     # Create base image with stunning multi-layer gradient background
     img = Image.new("RGB", (width, height), color=(8, 8, 18))
@@ -406,27 +450,31 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
     draw = ImageDraw.Draw(img)
     
-    # Load fonts with better fallbacks
+    # Load fonts with responsive sizing
+    font_size_title = int(44 * scale_factor)
+    font_size_label = int(30 * scale_factor)
+    font_size_text = int(24 * scale_factor)
+    
     try:
-        font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", 44)
-        font_label = ImageFont.truetype("DejaVuSans-Bold.ttf", 30)
-        font_text = ImageFont.truetype("DejaVuSans.ttf", 24)
+        font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", font_size_title)
+        font_label = ImageFont.truetype("DejaVuSans-Bold.ttf", font_size_label)
+        font_text = ImageFont.truetype("DejaVuSans.ttf", font_size_text)
     except Exception:
         try:
-            font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 44)
-            font_label = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 30)
-            font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 24)
+            font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size_title)
+            font_label = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size_label)
+            font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size_text)
         except Exception:
             font_title = ImageFont.load_default()
             font_label = ImageFont.load_default()
             font_text = ImageFont.load_default()
     
-    # Stunning title with multiple glow effects
+    # Stunning title with multiple glow effects (centered)
     title_text = "Media Bot Setup"
     title_bbox = draw.textbbox((0, 0), title_text, font=font_title)
     title_width = title_bbox[2] - title_bbox[0]
-    title_x = (width - title_width) // 2
-    title_y = padding
+    title_x = offset_x + (content_width - title_width) // 2 if content_width < width else (width - title_width) // 2
+    title_y = offset_y + padding
     
     # Create title glow layer
     title_glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
@@ -475,13 +523,13 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     
     wifi_label_bbox = draw.textbbox((0, 0), wifi_label, font=font_label)
     wifi_label_width = wifi_label_bbox[2] - wifi_label_bbox[0]
-    wifi_label_x = padding + (qr_size - wifi_label_width) // 2
+    wifi_label_x = offset_x + padding + (qr_size - wifi_label_width) // 2
     
     url_label_bbox = draw.textbbox((0, 0), url_label, font=font_label)
     url_label_width = url_label_bbox[2] - url_label_bbox[0]
-    url_label_x = padding + qr_size + qr_spacing + (qr_size - url_label_width) // 2
+    url_label_x = offset_x + padding + qr_size + qr_spacing + (qr_size - url_label_width) // 2
     
-    label_y = padding + title_height + 20
+    label_y = offset_y + padding + title_height + 20
     
     # Create label glow effects
     label_glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
@@ -513,10 +561,10 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     draw.text((wifi_label_x, label_y), wifi_label, fill=(148, 220, 255), font=font_label)
     draw.text((url_label_x, label_y), url_label, fill=(148, 220, 255), font=font_label)
     
-    # Calculate QR code positions
-    qr_y = padding + title_height + label_height + 25
-    wifi_qr_x = padding
-    url_qr_x = padding + qr_size + qr_spacing
+    # Calculate QR code positions (with offset for centering)
+    qr_y = offset_y + padding + title_height + label_height + 25
+    wifi_qr_x = offset_x + padding
+    url_qr_x = offset_x + padding + qr_size + qr_spacing
     
     # Create stunning card containers with multiple shadow layers and highlights
     # Create shadow layer for QR cards with multiple shadow passes
@@ -622,7 +670,7 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     text_glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     text_glow_draw = ImageDraw.Draw(text_glow)
     
-    line_height = 36
+    line_height = int(36 * scale_factor)
     for i, line in enumerate(wifi_text_lines):
         line_bbox = draw.textbbox((0, 0), line, font=font_text)
         line_width = line_bbox[2] - line_bbox[0]
@@ -728,6 +776,16 @@ async def ensure_telegram_token(force: bool = False) -> None:
         print("[init] Setup flow already running; ignoring duplicate request.")
         return
     os.environ["MEDIA_BOT_SETUP_ACTIVE"] = "1"
+
+    # Start loading.gif first to avoid gap
+    loading_proc: subprocess.Popen | None = None
+    loading_path = _project_root() / "loading.gif"
+    if loading_path.exists():
+        try:
+            loading_proc = await _display_with_mpv(loading_path)
+            print("[init] Showing loading.gif...")
+        except Exception as e:
+            print(f"[init] Could not show loading.gif: {e}")
 
     host_ip = _detect_local_ip()
     desired_port = 8765
@@ -924,16 +982,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
         # Store setup server info for loading.gif access
         os.environ["SETUP_SERVER_PORT"] = str(bound_port)
         os.environ["SETUP_SERVER_HOST"] = ap_ip
-        # Show loading.gif while generating QR codes
-        loading_proc: subprocess.Popen | None = None
-        loading_path = _project_root() / "loading.gif"
-        if loading_path.exists():
-            try:
-                loading_proc = await _display_with_mpv(loading_path)
-                print("[init] Showing loading.gif while generating QR codes...")
-            except Exception as e:
-                print(f"[init] Could not show loading.gif: {e}")
-
+        
         # Prepare QR image under project data dir
         project = _project_root()
         tmp_dir = project / ".setup"
@@ -943,14 +992,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
         qr_png = tmp_dir / "setup_qr.png"
         _generate_composite_qr(setup_url, current_ap_ssid, current_ap_password, qr_png)
         
-        # Hide loading.gif before showing QR codes
-        if loading_proc and loading_proc.poll() is None:
-            try:
-                loading_proc.terminate()
-                loading_proc.wait(timeout=1)
-            except Exception:
-                pass
-        
+        # Don't terminate loading.gif - just show QR on top (loading.gif stays in background)
         try:
             # Try to show QR with mpv; fallback to printing URL if mpv missing
             try:
@@ -967,11 +1009,8 @@ async def ensure_telegram_token(force: bool = False) -> None:
                 await asyncio.sleep(0.5)
         finally:
             await runner.cleanup()
-            if mpv_proc and mpv_proc.poll() is None:
-                try:
-                    mpv_proc.terminate()
-                except Exception:
-                    pass
+            # Don't terminate processes - let them run in background
+            # mpv will handle cleanup when new content is loaded
 
     try:
         await run_flow()
