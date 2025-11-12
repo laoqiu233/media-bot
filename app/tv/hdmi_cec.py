@@ -21,7 +21,7 @@ class CECController:
         self.cec_device = cec_device
         self.enabled = enabled
         self._cec_available: bool | None = None
-        self._lock = asyncio.Lock()  # Lock to prevent concurrent cec-client usage
+        self._lock = asyncio.Lock()  # Lock to prevent concurrent cec-ctl usage
         self._persistent_process: Optional[asyncio.subprocess.Process] = None
         self._current_command: Optional[str] = None  # Track current running command
 
@@ -38,10 +38,10 @@ class CECController:
             return self._cec_available
 
         try:
-            # Try to run cec-client
+            # Try to run cec-ctl
             process = await asyncio.create_subprocess_exec(
                 "which",
-                "cec-client",
+                "cec-ctl",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -61,11 +61,11 @@ class CECController:
             self._cec_available = False
             return False
 
-    async def _send_cec_command(self, command: str, timeout: float = 2.0) -> tuple[bool, str]:
-        """Send a CEC command using cec-client with locking and persistent connection.
+    async def _send_cec_command(self, args: list[str], timeout: float = 2.0) -> tuple[bool, str]:
+        """Send a CEC command using cec-ctl with locking.
 
         Args:
-            command: CEC command to send
+            args: List of cec-ctl arguments (e.g., ["--to", "0", "--standby"])
             timeout: Command timeout in seconds (reduced for faster response)
 
         Returns:
@@ -77,15 +77,14 @@ class CECController:
         if not await self.check_availability():
             return False, "CEC is not available"
 
-        # Use lock to prevent concurrent cec-client usage
+        # Use lock to prevent concurrent cec-ctl usage
         async with self._lock:
-            self._current_command = command
+            self._current_command = " ".join(args)
             try:
-                # Use echo to send command to cec-client with reduced delay
-                # -s: single run mode (faster, no interactive mode)
-                # -d 1: minimal delay (faster execution)
-                process = await asyncio.create_subprocess_shell(
-                    f'echo "{command}" | cec-client -s -d 1',
+                # Build cec-ctl command with device specification
+                cmd = ["cec-ctl", "-d", self.cec_device] + args
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
@@ -102,7 +101,7 @@ class CECController:
                 error = stderr.decode() if stderr else ""
 
                 if process.returncode == 0:
-                    logger.debug(f"CEC command '{command}' executed successfully")
+                    logger.debug(f"CEC command '{self._current_command}' executed successfully")
                     self._current_command = None
                     return True, output
                 else:
@@ -130,7 +129,7 @@ class CECController:
             True if successful
         """
         logger.info("Turning TV on via CEC")
-        success, output = await self._send_cec_command("pow 0")
+        success, output = await self._send_cec_command(["--to", "0", "--image-view-on"])
         return success
 
     async def tv_off(self) -> bool:
@@ -140,7 +139,7 @@ class CECController:
             True if successful
         """
         logger.info("Turning TV off via CEC")
-        success, output = await self._send_cec_command("standby 0")
+        success, output = await self._send_cec_command(["--to", "0", "--standby"])
         return success
 
     async def set_active_source(self) -> bool:
@@ -150,7 +149,7 @@ class CECController:
             True if successful
         """
         logger.info("Setting Raspberry Pi as active source")
-        success, output = await self._send_cec_command("as")
+        success, output = await self._send_cec_command(["--to", "0", "--active-source"])
         return success
 
     async def get_power_status(self) -> str | None:
@@ -159,12 +158,12 @@ class CECController:
         Returns:
             Power status string or None
         """
-        success, output = await self._send_cec_command("pow 0")
+        success, output = await self._send_cec_command(["--to", "0", "--get-power-status"])
         if not success:
             return None
 
         # Parse output for power status
-        # CEC response format: "power status: on" or "power status: standby"
+        # cec-ctl response format: "power status: on" or "power status: standby"
         match = re.search(r"power status:\s*(\w+)", output, re.IGNORECASE)
         if match:
             status = match.group(1).lower()
@@ -196,7 +195,7 @@ class CECController:
         logger.info(f"Setting TV volume to {level}")
         # Convert 0-100 to CEC volume (0x00 to 0x7F)
         cec_volume = int((level / 100) * 0x7F)
-        success, _ = await self._send_cec_command(f"volset {cec_volume}")
+        success, _ = await self._send_cec_command(["--to", "0", "--set-volume", str(cec_volume)])
         return success
 
     async def volume_up(self) -> bool:
@@ -206,7 +205,7 @@ class CECController:
             True if successful
         """
         logger.info("Increasing TV volume")
-        success, _ = await self._send_cec_command("volup")
+        success, _ = await self._send_cec_command(["--to", "0", "--volume-up"])
         return success
 
     async def volume_down(self) -> bool:
@@ -216,7 +215,7 @@ class CECController:
             True if successful
         """
         logger.info("Decreasing TV volume")
-        success, _ = await self._send_cec_command("voldown")
+        success, _ = await self._send_cec_command(["--to", "0", "--volume-down"])
         return success
 
     async def mute(self) -> bool:
@@ -226,7 +225,7 @@ class CECController:
             True if successful
         """
         logger.info("Muting TV")
-        success, _ = await self._send_cec_command("mute")
+        success, _ = await self._send_cec_command(["--to", "0", "--mute"])
         return success
 
     async def get_osd_name(self) -> str | None:
@@ -235,12 +234,12 @@ class CECController:
         Returns:
             TV name or None
         """
-        success, output = await self._send_cec_command("osd 0")
+        success, output = await self._send_cec_command(["--to", "0", "--get-osd-name"])
         if not success:
             return None
 
         # Parse output for OSD name
-        match = re.search(r"OSD name:\s*(.+)", output)
+        match = re.search(r"osd name:\s*(.+)", output, re.IGNORECASE)
         if match:
             name = match.group(1).strip()
             logger.info(f"TV OSD name: {name}")
@@ -254,14 +253,14 @@ class CECController:
         Returns:
             List of device information
         """
-        success, output = await self._send_cec_command("scan")
+        success, output = await self._send_cec_command(["--scan"])
         if not success:
             return []
 
         devices = []
         # Parse scan output
-        # Format: "device #0: TV"
-        for match in re.finditer(r"device #(\d+):\s*(.+)", output, re.IGNORECASE | re.MULTILINE):
+        # Format: "device #0: TV" or similar
+        for match in re.finditer(r"device\s+#?(\d+):\s*(.+)", output, re.IGNORECASE | re.MULTILINE):
             device_num = int(match.group(1))
             device_name = match.group(2).strip()
             devices.append({"address": device_num, "name": device_name})
@@ -279,7 +278,7 @@ class CECController:
             True if successful
         """
         logger.info(f"Sending key: {key_code}")
-        success, _ = await self._send_cec_command(f"tx 10:{key_code}")
+        success, _ = await self._send_cec_command(["--to", "0", "--key", key_code])
         return success
 
     async def get_status(self) -> dict:
