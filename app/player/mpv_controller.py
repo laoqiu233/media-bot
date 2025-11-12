@@ -43,6 +43,7 @@ class MPVController:
         vo: str = "gpu",
         ao: str = "alsa",
         hwdec: str = "auto",
+        fullscreen: bool = False,
     ):
         """Initialize the MPV player with configuration.
 
