@@ -95,6 +95,13 @@ class MPVController:
                 self._trigger_event("file_loaded", event)
                 # Hide loading.gif when file loads - actually terminate it now
                 asyncio.create_task(self._hide_loading_gif())
+            
+            @self._player.event_callback("playback-restart")
+            def playback_restart_callback(event):
+                """Called when playback actually starts/restarts."""
+                self._is_playing = True
+                # Also hide loading.gif when playback starts (fallback)
+                asyncio.create_task(self._hide_loading_gif())
 
             logger.info("MPV player initialized successfully")
             
@@ -160,8 +167,14 @@ class MPVController:
                 self._is_playing = True
 
                 # Give MPV a moment to start and switch to video
-                # The file-loaded event will terminate loading.gif when video is ready
-                await asyncio.sleep(0.3)
+                # The file-loaded/playback-restart events will terminate loading.gif when video is ready
+                await asyncio.sleep(0.5)
+                
+                # Fallback: if loading.gif is still running after a delay, force stop it
+                # This ensures it stops even if events don't fire
+                if self._loading_proc is not None and self._loading_proc.poll() is None:
+                    logger.info("Fallback: stopping loading.gif after file load")
+                    await self._hide_loading_gif()
 
                 # Verify playback actually started
                 try:

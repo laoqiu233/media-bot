@@ -393,54 +393,60 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     offset_x = (width - content_width) // 2 if content_width < width else 0
     offset_y = (height - content_height) // 2 if content_height < height else 0
     
-    # Create base image with form-style dark gradient background
+    # Create base image with form-style dark gradient background (FAST gradient approach)
     # Match the form's radial gradient: #1e293b -> #0f172a -> #020617
+    # Use linear gradient approach instead of circles for much better performance
     img = Image.new("RGB", (width, height), color=(2, 6, 23))  # #020617
     draw = ImageDraw.Draw(img)
     
-    # Layer 1: Radial gradient matching form style (optimized for large screens)
-    center_x, center_y = width // 2, height // 3  # Top center like form
-    max_radius = int((width ** 2 + height ** 2) ** 0.5)
-    step = max(2, width // 800)  # Adaptive step for performance
-    
-    for radius in range(max_radius, 0, -step * 5):
-        # Colors matching form: #1e293b (30, 41, 59) -> #0f172a (15, 23, 42) -> #020617 (2, 6, 23)
-        ratio = radius / max_radius if max_radius > 0 else 0
-        if ratio > 0.45:  # Outer area - #1e293b
-            r, g, b = 30, 41, 59
-        elif ratio > 0.25:  # Middle area - #0f172a
-            r, g, b = 15, 23, 42
-        else:  # Inner area - #020617
-            r, g, b = 2, 6, 23
+    # Fast linear gradient from top to bottom (matching form's radial gradient effect)
+    # Colors: #1e293b (30, 41, 59) at top -> #0f172a (15, 23, 42) at middle -> #020617 (2, 6, 23) at bottom
+    step = max(4, height // 200)  # Much larger step for performance
+    for y in range(0, height, step):
+        ratio = y / height if height > 0 else 0
+        if ratio < 0.45:  # Top area - #1e293b transitioning to #0f172a
+            local_ratio = ratio / 0.45 if 0.45 > 0 else 0
+            r = int(30 - (30 - 15) * local_ratio)
+            g = int(41 - (41 - 23) * local_ratio)
+            b = int(59 - (59 - 42) * local_ratio)
+        else:  # Bottom area - #0f172a transitioning to #020617
+            local_ratio = (ratio - 0.45) / 0.55 if 0.55 > 0 else 0
+            r = int(15 - (15 - 2) * local_ratio)
+            g = int(23 - (23 - 6) * local_ratio)
+            b = int(42 - (42 - 23) * local_ratio)
         
-        # Draw radial gradient circle
-        overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        overlay_draw = ImageDraw.Draw(overlay)
-        overlay_draw.ellipse(
-            [center_x - radius, center_y - radius, center_x + radius, center_y + radius],
-            fill=(r, g, b, 255)
-        )
-        img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
-        draw = ImageDraw.Draw(img)
+        draw.rectangle([(0, y), (width, min(y + step, height))], fill=(r, g, b))
     
-    # Subtle accent glows (matching form's subtle style)
-    # Less intense than before to match form aesthetic
-    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    overlay_draw = ImageDraw.Draw(overlay)
+    # Subtle diagonal gradient accent (matching form's button gradient style)
+    # Light green to cyan gradient: #16a34a -> #22d3ee (135deg like form buttons)
+    # Apply as a subtle overlay in center area
+    accent_overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    accent_draw = ImageDraw.Draw(accent_overlay)
     
-    # Subtle blue accent glow (matching form's button colors)
-    glow_center_x, glow_center_y = width // 2, height // 2
-    glow_radius = min(width, height) // 3
-    for radius in range(glow_radius, 0, -20):
-        alpha = int(8 * (1 - radius / glow_radius) ** 2)  # Much more subtle
+    # Create diagonal gradient effect (top-left to bottom-right, 135deg)
+    center_x, center_y = width // 2, height // 2
+    gradient_size = min(width, height) // 2
+    
+    for i in range(gradient_size, 0, -max(4, gradient_size // 50)):
+        # Distance from center
+        dist_ratio = i / gradient_size if gradient_size > 0 else 0
+        alpha = int(12 * (1 - dist_ratio) ** 2)  # Subtle accent
+        
         if alpha > 0:
-            overlay_draw.ellipse(
-                [glow_center_x - radius, glow_center_y - radius, 
-                 glow_center_x + radius, glow_center_y + radius],
-                fill=(59, 130, 246, alpha)  # Blue matching form buttons
+            # Diagonal gradient colors (green to cyan)
+            color_ratio = 1 - dist_ratio
+            r = int(22 + (16 - 22) * color_ratio)  # 16a34a to 22d3ee
+            g = int(211 + (163 - 211) * color_ratio)
+            b = int(238 + (74 - 238) * color_ratio)
+            
+            # Draw diagonal gradient rectangle
+            size = gradient_size - i
+            accent_draw.rectangle(
+                [center_x - size, center_y - size, center_x + size, center_y + size],
+                fill=(r, g, b, alpha)
             )
     
-    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+    img = Image.alpha_composite(img.convert("RGBA"), accent_overlay).convert("RGB")
     draw = ImageDraw.Draw(img)
     
     # Load fonts with responsive sizing
@@ -462,43 +468,30 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
             font_label = ImageFont.load_default()
             font_text = ImageFont.load_default()
     
-    # Stunning title with multiple glow effects (centered)
+    # Title with form-style button gradient colors (light green to cyan)
     title_text = "Media Bot Setup"
     title_bbox = draw.textbbox((0, 0), title_text, font=font_title)
     title_width = title_bbox[2] - title_bbox[0]
     title_x = offset_x + (content_width - title_width) // 2 if content_width < width else (width - title_width) // 2
     title_y = offset_y + padding
     
-    # Create title glow layer
+    # Create title with gradient effect (matching form button: #16a34a -> #22d3ee)
+    # Use simplified glow for performance
     title_glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     title_glow_draw = ImageDraw.Draw(title_glow)
     
-    # Multiple glow layers for title
-    for offset in range(8, 0, -1):
-        alpha = int(30 * (1 - offset / 8))
+    # Simplified glow (fewer layers for performance)
+    for offset in range(4, 0, -1):
+        alpha = int(20 * (1 - offset / 4))
         if alpha > 0:
+            # Use button gradient colors for glow
+            r = int(22 + (16 - 22) * (offset / 4))  # Cyan to green
+            g = int(211 + (163 - 211) * (offset / 4))
+            b = int(238 + (74 - 238) * (offset / 4))
             title_glow_draw.text(
                 (title_x + offset, title_y + offset),
                 title_text,
-                fill=(100, 200, 255, alpha),
-                font=font_title,
-            )
-            title_glow_draw.text(
-                (title_x - offset, title_y + offset),
-                title_text,
-                fill=(100, 200, 255, alpha),
-                font=font_title,
-            )
-            title_glow_draw.text(
-                (title_x + offset, title_y - offset),
-                title_text,
-                fill=(100, 200, 255, alpha),
-                font=font_title,
-            )
-            title_glow_draw.text(
-                (title_x - offset, title_y - offset),
-                title_text,
-                fill=(100, 200, 255, alpha),
+                fill=(r, g, b, alpha),
                 font=font_title,
             )
     
@@ -506,9 +499,9 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     draw = ImageDraw.Draw(img)
     
     # Draw title shadow for depth
-    draw.text((title_x + 3, title_y + 3), title_text, fill=(0, 0, 0, 180), font=font_title)
-    # Draw main title with gradient-like effect (white to light cyan)
-    draw.text((title_x, title_y), title_text, fill=(255, 255, 255), font=font_title)
+    draw.text((title_x + 2, title_y + 2), title_text, fill=(0, 0, 0), font=font_title)
+    # Draw main title with button gradient color (cyan, matching form buttons)
+    draw.text((title_x, title_y), title_text, fill=(34, 211, 238), font=font_title)  # #22d3ee
     
     # Add QR code labels with stunning styling and decorative elements
     wifi_label = "1. Join Wi‑Fi"
@@ -524,23 +517,28 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     
     label_y = offset_y + padding + title_height + 20
     
-    # Create label glow effects
+    # Create label glow effects (matching form button gradient)
     label_glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     label_glow_draw = ImageDraw.Draw(label_glow)
     
-    for offset in range(4, 0, -1):
-        alpha = int(20 * (1 - offset / 4))
+    # Simplified glow for performance
+    for offset in range(2, 0, -1):
+        alpha = int(15 * (1 - offset / 2))
         if alpha > 0:
+            # Use button gradient colors
+            r = int(22 + (16 - 22) * (offset / 2))
+            g = int(211 + (163 - 211) * (offset / 2))
+            b = int(238 + (74 - 238) * (offset / 2))
             label_glow_draw.text(
                 (wifi_label_x + offset, label_y + offset),
                 wifi_label,
-                fill=(148, 220, 255, alpha),
+                fill=(r, g, b, alpha),
                 font=font_label,
             )
             label_glow_draw.text(
                 (url_label_x + offset, label_y + offset),
                 url_label,
-                fill=(148, 220, 255, alpha),
+                fill=(r, g, b, alpha),
                 font=font_label,
             )
     
@@ -548,11 +546,11 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     draw = ImageDraw.Draw(img)
     
     # Draw label shadows
-    draw.text((wifi_label_x + 2, label_y + 2), wifi_label, fill=(0, 0, 0), font=font_label)
-    draw.text((url_label_x + 2, label_y + 2), url_label, fill=(0, 0, 0), font=font_label)
-    # Draw main labels with vibrant accent color
-    draw.text((wifi_label_x, label_y), wifi_label, fill=(148, 220, 255), font=font_label)
-    draw.text((url_label_x, label_y), url_label, fill=(148, 220, 255), font=font_label)
+    draw.text((wifi_label_x + 1, label_y + 1), wifi_label, fill=(0, 0, 0), font=font_label)
+    draw.text((url_label_x + 1, label_y + 1), url_label, fill=(0, 0, 0), font=font_label)
+    # Draw main labels with button gradient color (cyan)
+    draw.text((wifi_label_x, label_y), wifi_label, fill=(34, 211, 238), font=font_label)  # #22d3ee
+    draw.text((url_label_x, label_y), url_label, fill=(34, 211, 238), font=font_label)  # #22d3ee
     
     # Calculate QR code positions (with offset for centering)
     qr_y = offset_y + padding + title_height + label_height + 25
@@ -862,74 +860,13 @@ async def ensure_telegram_token(force: bool = False) -> None:
                 sys.exit(1)
             else:
                 print(f"[init] nmcli hotspot started: {result.stdout}")
-                con_name = None
-                con_list = subprocess.run(
-                    ["sudo", "nmcli", "-t", "-f", "NAME,DEVICE,TYPE", "con", "show", "--active"],
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                )
-                if con_list.returncode == 0 and con_list.stdout:
-                    for line in con_list.stdout.splitlines():
-                        parts = line.split(":")
-                        if len(parts) >= 3:
-                            name, dev, typ = parts[0], parts[1], parts[2]
-                            if dev == wifi_iface and typ == "wifi":
-                                con_name = name
-                                break
-                if not con_name:
-                    # Default NM creates a "Hotspot" profile; try that as fallback
-                    con_name = "Hotspot"
-                print(f"[init] Using connection profile: {con_name}")
-                # Apply sharing and static addressing; ignore errors if fields unsupported
-                # Use common NetworkManager shared subnet 10.42.0.0/24 with gateway .1
-                for args in [
-                    ["sudo", "nmcli", "con", "modify", con_name, "ipv4.method", "shared"],
-                    ["sudo", "nmcli", "con", "modify", con_name, "ipv4.addresses", "10.42.0.1/24"],
-                    ["sudo", "nmcli", "con", "modify", con_name, "ipv4.gateway", "10.42.0.1"],
-                    ["sudo", "nmcli", "con", "modify", con_name, "ipv4.never-default", "yes"],
-                    ["sudo", "nmcli", "con", "modify", con_name, "ipv6.method", "ignore"],
-                    # Force 2.4GHz band and stable channel; some clients can't use 5GHz APs
-                    ["sudo", "nmcli", "con", "modify", con_name, "802-11-wireless.band", "bg"],
-                    ["sudo", "nmcli", "con", "modify", con_name, "802-11-wireless.channel", "6"],
-                    # Ensure AP mode and SSID are correct
-                    ["sudo", "nmcli", "con", "modify", con_name, "802-11-wireless.mode", "ap"],
-                    ["sudo", "nmcli", "con", "modify", con_name, "802-11-wireless.ssid", current_ap_ssid],
-                    # Improve compatibility: WPA2-PSK (RSN) with CCMP only
-                    ["sudo", "nmcli", "con", "modify", con_name, "wifi-sec.key-mgmt", "wpa-psk"],
-                    ["sudo", "nmcli", "con", "modify", con_name, "wifi-sec.proto", "rsn"],
-                    ["sudo", "nmcli", "con", "modify", con_name, "wifi-sec.group", "ccmp"],
-                    ["sudo", "nmcli", "con", "modify", con_name, "wifi-sec.pairwise", "ccmp"],
-                    ["sudo", "nmcli", "con", "modify", con_name, "wifi-sec.psk", current_ap_password],
-                    # Disable MAC randomization to avoid reconnect loops on some devices
-                    ["sudo", "nmcli", "con", "modify", con_name, "wifi.mac-address-randomization", "0"],
-                    [
-                        "sudo", "nmcli",
-                        "con",
-                        "modify",
-                        con_name,
-                        "802-11-wireless.cloned-mac-address",
-                        "preserve",
-                    ],
-                    # Reduce powersave issues
-                    ["sudo", "nmcli", "con", "modify", con_name, "802-11-wireless.powersave", "2"],
-                ]:
-                    r = subprocess.run(args, check=False, capture_output=True, text=True)
-                    if r.returncode != 0:
-                        print(
-                            f"[init] nmcli modify warn: {' '.join(args[3:])} -> {r.stderr}"
-                        )
-                # Reload the connection to apply changes
-                r1 = subprocess.run(
-                    ["sudo", "nmcli", "con", "down", con_name], check=False, capture_output=True, text=True
-                )
-                r2 = subprocess.run(
-                    ["sudo", "nmcli", "con", "up", con_name], check=False, capture_output=True, text=True
-                )
-                if r1.returncode != 0:
-                    print(f"[init] nmcli down warn: {r1.stderr}")
-                if r2.returncode != 0:
-                    print(f"[init] nmcli up warn: {r2.stderr}")
+                # NetworkManager's hotspot command already sets up most things automatically
+                # Only apply essential settings if needed - most are handled by default
+                # Skip the lengthy modify/up/down cycle for better performance
+                # The hotspot command already configures:
+                # - AP mode, SSID, password, WPA2 security
+                # - IP sharing (10.42.0.1/24)
+                # - Basic connectivity settings
         except Exception as e:
             print(f"Error creating hotspot: {e}")
             pass
