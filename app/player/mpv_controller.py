@@ -34,6 +34,8 @@ class MPVController:
             self._is_playing = False
             self._event_handlers: dict[str, list[Callable]] = {}
             self._loading_proc: Any | None = None  # Process for displaying loading.gif
+            self._background_tasks: set[asyncio.Task] = set()  # Keep track of background tasks
+            self._event_loop: asyncio.AbstractEventLoop | None = None  # Store event loop reference
             self._initialized = True
 
     def initialize(
@@ -59,6 +61,20 @@ class MPVController:
         if self._player is not None:
             logger.warning("MPV player already initialized")
             return
+
+        # Store event loop reference for use in callbacks
+        try:
+            self._event_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop - try to get or create one
+            try:
+                # Try to get existing event loop (may not be running)
+                self._event_loop = asyncio.get_event_loop()
+            except RuntimeError:
+                # No event loop exists, create a new one
+                self._event_loop = asyncio.new_event_loop()
+                # Set it as the event loop for this thread
+                asyncio.set_event_loop(self._event_loop)
 
         try:
             self._player = mpv.MPV(
@@ -90,7 +106,24 @@ class MPVController:
                 async def show_loading_after_delay():
                     await asyncio.sleep(1.5)
                     await self._show_loading_gif()
-                asyncio.create_task(show_loading_after_delay())
+                
+                # Assume loop is always running - use the stored loop from initialize
+                loop = self._event_loop
+                if loop is None:
+                    # Fallback: try to get current running loop
+                    try:
+                        loop = asyncio.get_running_loop()
+                        self._event_loop = loop
+                    except RuntimeError:
+                        logger.error("No event loop available for showing loading gif")
+                        return
+                
+                # Create task in the running loop (fire and forget)
+                task = loop.create_task(show_loading_after_delay())
+                # Store task to prevent garbage collection and "never awaited" warning
+                self._background_tasks.add(task)
+                # Remove task when it completes
+                task.add_done_callback(self._background_tasks.discard)
 
             @self._player.event_callback("file-loaded")
             def file_loaded_callback(event):

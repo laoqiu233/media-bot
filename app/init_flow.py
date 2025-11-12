@@ -500,8 +500,8 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     
     # Draw title shadow for depth
     draw.text((title_x + 2, title_y + 2), title_text, fill=(0, 0, 0), font=font_title)
-    # Draw main title with button gradient color (cyan, matching form buttons)
-    draw.text((title_x, title_y), title_text, fill=(34, 211, 238), font=font_title)  # #22d3ee
+    # Draw main title with white color (matching form text style)
+    draw.text((title_x, title_y), title_text, fill=(255, 255, 255), font=font_title)
     
     # Add QR code labels with stunning styling and decorative elements
     wifi_label = "1. Join Wi‑Fi"
@@ -726,6 +726,11 @@ async def _display_with_mpv(image_path: Path) -> subprocess.Popen:
         "--video-margin-ratio-top=0",
         "--video-margin-ratio-bottom=0",
         "--fullscreen",
+        "--video-zoom=0",  # No zoom
+        "--video-pan-x=0",  # No horizontal pan
+        "--video-pan-y=0",  # No vertical pan
+        "--video-align-x=0",  # Center horizontally
+        "--video-align-y=0",  # Center vertically
         str(image_path),
     ]
     # Start detached so we can kill later
@@ -924,7 +929,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
                 mpv_proc = await _display_with_mpv(qr_png)
                 # QR code screen is now loaded - _display_with_mpv already waited up to 1.5 seconds
                 # Give it just a tiny moment more to ensure it's fully rendered and visible
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(1.5)
                 
                 # NOW stop loading.gif after QR code screen is confirmed loaded and visible
                 if loading_proc is not None:
@@ -956,9 +961,35 @@ async def ensure_telegram_token(force: bool = False) -> None:
             while not setup_completed:
                 await asyncio.sleep(0.5)
         finally:
+            # Stop QR code screen and show loading.gif before cleanup
+            if mpv_proc is not None:
+                try:
+                    mpv_proc.terminate()
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.to_thread(mpv_proc.wait), timeout=1.0
+                        )
+                    except asyncio.TimeoutError:
+                        mpv_proc.kill()
+                        await asyncio.to_thread(mpv_proc.wait)
+                    # Wait a bit for QR code screen to fully close
+                    await asyncio.sleep(1.5)
+                    # Now show loading.gif
+                    if loading_path.exists():
+                        try:
+                            loading_proc = await _display_with_mpv(loading_path)
+                            print("[init] Showing loading.gif after QR code screen closed")
+                        except Exception as e:
+                            print(f"[init] Could not show loading.gif: {e}")
+                except Exception as e:
+                    print(f"[init] Error stopping QR code screen: {e}")
+                    try:
+                        if mpv_proc.poll() is None:
+                            mpv_proc.kill()
+                    except Exception:
+                        pass
+            
             await runner.cleanup()
-            # Don't terminate processes - let them run in background
-            # mpv will handle cleanup when new content is loaded
 
     try:
         await run_flow()
