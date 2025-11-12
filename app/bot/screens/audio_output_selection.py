@@ -190,43 +190,54 @@ class AudioOutputSelectionScreen(Screen):
         Returns:
             Tuple of (text, keyboard, options)
         """
-        sinks = await _get_available_sinks()
-        current_sink = await _get_current_default_sink()
+        try:
+            logger.info("Rendering audio output selection screen")
+            sinks = await _get_available_sinks()
+            logger.info(f"Found {len(sinks)} audio sinks")
+            current_sink = await _get_current_default_sink()
+            logger.info(f"Current default sink: {current_sink}")
 
-        text = "🔊 *Audio Output Selection*\n\n"
+            text = "🔊 *Audio Output Selection*\n\n"
 
-        if not sinks:
-            text += "⚠️ No audio sinks found.\n\n"
-            text += "Make sure PulseAudio or PipeWire is running."
-            keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data=AUDIO_OUTPUT_BACK)]]
+            if not sinks:
+                text += "⚠️ No audio sinks found.\n\n"
+                text += "Make sure PulseAudio or PipeWire is running."
+                keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data=AUDIO_OUTPUT_BACK)]]
+                return text, InlineKeyboardMarkup(keyboard), RenderOptions()
+
+            if current_sink:
+                # Find current sink in the list
+                current_display = next((display for name, display in sinks if name == current_sink), None)
+                if current_display:
+                    text += f"Current: *{current_display}*\n\n"
+                else:
+                    text += f"Current: *{current_sink}*\n\n"
+            else:
+                text += "Current: Unknown\n\n"
+
+            text += "Select audio output:\n"
+
+            keyboard = []
+            for sink_name, display_name in sinks:
+                button_text = display_name
+                if current_sink and sink_name == current_sink:
+                    button_text = f"✓ {display_name}"
+
+                # Store sink name in callback data
+                keyboard.append(
+                    [InlineKeyboardButton(button_text, callback_data=f"{AUDIO_OUTPUT_SELECT}{sink_name}")]
+                )
+
+            keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data=AUDIO_OUTPUT_BACK)])
+
             return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
-        if current_sink:
-            # Find current sink in the list
-            current_display = next((display for name, display in sinks if name == current_sink), None)
-            if current_display:
-                text += f"Current: *{current_display}*\n\n"
-            else:
-                text += f"Current: *{current_sink}*\n\n"
-        else:
-            text += "Current: Unknown\n\n"
-
-        text += "Select audio output:\n"
-
-        keyboard = []
-        for sink_name, display_name in sinks:
-            button_text = display_name
-            if current_sink and sink_name == current_sink:
-                button_text = f"✓ {display_name}"
-
-            # Store sink name in callback data
-            keyboard.append(
-                [InlineKeyboardButton(button_text, callback_data=f"{AUDIO_OUTPUT_SELECT}{sink_name}")]
-            )
-
-        keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data=AUDIO_OUTPUT_BACK)])
-
-        return text, InlineKeyboardMarkup(keyboard), RenderOptions()
+        except Exception as e:
+            logger.error(f"Error in render: {e}", exc_info=True)
+            text = "🔊 *Audio Output Selection*\n\n"
+            text += f"❌ Error: {str(e)}"
+            keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data=AUDIO_OUTPUT_BACK)]]
+            return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
     async def handle_callback(
         self,
@@ -242,29 +253,41 @@ class AudioOutputSelectionScreen(Screen):
         Returns:
             Navigation or None
         """
-        if query.data == AUDIO_OUTPUT_BACK:
-            return Navigation(next_screen="system_control")
+        try:
+            logger.info(f"Audio output callback received: {query.data}")
+            
+            if query.data == AUDIO_OUTPUT_BACK:
+                logger.info("Navigating back to system_control")
+                return Navigation(next_screen="system_control")
 
-        elif query.data.startswith(AUDIO_OUTPUT_SELECT):
-            sink_name = query.data[len(AUDIO_OUTPUT_SELECT) :]
+            elif query.data.startswith(AUDIO_OUTPUT_SELECT):
+                sink_name = query.data[len(AUDIO_OUTPUT_SELECT) :]
+                logger.info(f"Switching to audio sink: {sink_name}")
 
-            if not sink_name:
-                await query.answer("Error: No sink name provided", show_alert=True)
+                if not sink_name:
+                    logger.warning("No sink name provided in callback")
+                    await query.answer("Error: No sink name provided", show_alert=True)
+                    return None
+
+                success, message = await _switch_to_sink(sink_name)
+
+                if success:
+                    # Find display name for the message
+                    sinks = await _get_available_sinks()
+                    display_name = next((display for name, display in sinks if name == sink_name), sink_name)
+                    await query.answer(f"✅ Switched to {display_name}")
+                    logger.info(f"Successfully switched to {display_name}")
+                else:
+                    logger.error(f"Failed to switch sink: {message}")
+                    await query.answer(message, show_alert=True)
+
+                # Stay on the same screen to show updated state
                 return None
 
-            logger.info(f"Switching to audio sink: {sink_name}")
-
-            success, message = await _switch_to_sink(sink_name)
-
-            if success:
-                # Find display name for the message
-                sinks = await _get_available_sinks()
-                display_name = next((display for name, display in sinks if name == sink_name), sink_name)
-                await query.answer(f"✅ Switched to {display_name}")
-            else:
-                await query.answer(message, show_alert=True)
-
-            # Stay on the same screen to show updated state
+            logger.warning(f"Unknown callback data: {query.data}")
             return None
 
-        return None
+        except Exception as e:
+            logger.error(f"Error in handle_callback: {e}", exc_info=True)
+            await query.answer(f"Error: {str(e)}", show_alert=True)
+            return None
