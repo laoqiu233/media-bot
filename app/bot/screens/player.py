@@ -11,6 +11,7 @@ from app.bot.callback_data import (
     PLAYER_PAUSE,
     PLAYER_RESUME,
     PLAYER_SEEK,
+    PLAYER_SMART_REWIND,
     PLAYER_STOP,
     PLAYER_VOL_DOWN,
     PLAYER_VOL_UP,
@@ -96,10 +97,7 @@ class PlayerScreen(Screen):
                         InlineKeyboardButton("⏪ -30s", callback_data=f"{PLAYER_SEEK}-30"),
                         InlineKeyboardButton("⏩ +30s", callback_data=f"{PLAYER_SEEK}30"),
                     ],
-                    [
-                        InlineKeyboardButton("⏪⏪ -5m", callback_data=f"{PLAYER_SEEK}-300"),
-                        InlineKeyboardButton("⏩⏩ +5m", callback_data=f"{PLAYER_SEEK}300"),
-                    ],
+                    [InlineKeyboardButton("⏪⏩ Smart rewind", callback_data=PLAYER_SMART_REWIND)],
                     [
                         InlineKeyboardButton("🔉 Vol -", callback_data=PLAYER_VOL_DOWN),
                         InlineKeyboardButton("🔊 Vol +", callback_data=PLAYER_VOL_UP),
@@ -181,3 +179,5 @@ class PlayerScreen(Screen):
                 await query.answer(f"{direction} Seeked {abs_seconds}s" if success else "Failed")
             except ValueError:
                 await query.answer("Invalid seek value", show_alert=True)
+        elif query.data == PLAYER_SMART_REWIND:
+            return Navigation(next_screen="smart_rewind")
