@@ -166,14 +166,32 @@ class MPVController:
                 self._player.pause = False
                 self._is_playing = True
 
-                # Give MPV a moment to start and switch to video
-                # The file-loaded/playback-restart events will terminate loading.gif when video is ready
-                await asyncio.sleep(0.5)
+                # Wait for video to actually load and be visible
+                # Check if video is playing by waiting for time-pos or duration
+                max_wait = 2.0  # Maximum wait time
+                waited = 0.0
+                video_loaded = False
                 
-                # Fallback: if loading.gif is still running after a delay, force stop it
-                # This ensures it stops even if events don't fire
-                if self._loading_proc is not None and self._loading_proc.poll() is None:
-                    logger.info("Fallback: stopping loading.gif after file load")
+                while waited < max_wait:
+                    await asyncio.sleep(0.1)
+                    waited += 0.1
+                    
+                    # Check if video is actually playing/loaded
+                    try:
+                        if self._player.time_pos is not None or self._player.duration is not None:
+                            video_loaded = True
+                            break
+                    except Exception:
+                        pass
+                
+                # Only stop loading.gif AFTER video is confirmed loaded and visible
+                if video_loaded:
+                    logger.info("Video loaded and visible - stopping loading.gif")
+                    await self._hide_loading_gif()
+                else:
+                    # Fallback: if we can't detect, wait a bit more then stop anyway
+                    logger.warning("Could not confirm video load, stopping loading.gif anyway")
+                    await asyncio.sleep(0.5)
                     await self._hide_loading_gif()
 
                 # Verify playback actually started
@@ -554,6 +572,11 @@ class MPVController:
                 "--keepaspect=no",  # Stretch to fill screen (no black bars)
                 "--video-unscaled=no",  # Allow scaling
                 "--panscan=1.0",  # Fill screen completely
+                "--video-margin-ratio-left=0",
+                "--video-margin-ratio-right=0",
+                "--video-margin-ratio-top=0",
+                "--video-margin-ratio-bottom=0",
+                "--fullscreen",
                 str(loading_path),
             ]
             self._loading_proc = subprocess.Popen(

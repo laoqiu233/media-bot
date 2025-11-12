@@ -548,9 +548,9 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     # Draw label shadows
     draw.text((wifi_label_x + 1, label_y + 1), wifi_label, fill=(0, 0, 0), font=font_label)
     draw.text((url_label_x + 1, label_y + 1), url_label, fill=(0, 0, 0), font=font_label)
-    # Draw main labels with button gradient color (cyan)
-    draw.text((wifi_label_x, label_y), wifi_label, fill=(34, 211, 238), font=font_label)  # #22d3ee
-    draw.text((url_label_x, label_y), url_label, fill=(34, 211, 238), font=font_label)  # #22d3ee
+    # Draw main labels with white color (matching form text style)
+    draw.text((wifi_label_x, label_y), wifi_label, fill=(255, 255, 255), font=font_label)
+    draw.text((url_label_x, label_y), url_label, fill=(255, 255, 255), font=font_label)
     
     # Calculate QR code positions (with offset for centering)
     qr_y = offset_y + padding + title_height + label_height + 25
@@ -702,7 +702,11 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
 
 
 async def _display_with_mpv(image_path: Path) -> subprocess.Popen:
-    """Launch mpv to display the provided image fullscreen in a loop."""
+    """Launch mpv to display the provided image fullscreen in a loop.
+    
+    Returns the process. The caller should wait for the image to actually load
+    before stopping any loading screens.
+    """
     cmd = [
         "mpv",
         "--no-terminal",
@@ -717,11 +721,17 @@ async def _display_with_mpv(image_path: Path) -> subprocess.Popen:
         "--keepaspect=no",  # Stretch to fill screen (no black bars)
         "--video-unscaled=no",  # Allow scaling
         "--panscan=1.0",  # Fill screen completely
+        "--video-margin-ratio-left=0",
+        "--video-margin-ratio-right=0",
+        "--video-margin-ratio-top=0",
+        "--video-margin-ratio-bottom=0",
+        "--fullscreen",
         str(image_path),
     ]
     # Start detached so we can kill later
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    await asyncio.sleep(0.5)
+    # Wait a bit for mpv to start and display the image
+    await asyncio.sleep(0.8)
     return proc
 
 
@@ -903,11 +913,32 @@ async def ensure_telegram_token(force: bool = False) -> None:
         qr_png = tmp_dir / "setup_qr.png"
         _generate_composite_qr(setup_url, current_ap_ssid, current_ap_password, qr_png)
         
-        # Don't terminate loading.gif - just show QR on top (loading.gif stays in background)
         try:
             # Try to show QR with mpv; fallback to printing URL if mpv missing
             try:
                 mpv_proc = await _display_with_mpv(qr_png)
+                # QR code screen is now loaded - wait a bit more to ensure it's visible
+                await asyncio.sleep(0.3)
+                
+                # NOW stop loading.gif after QR code screen is confirmed loaded
+                if loading_proc is not None:
+                    try:
+                        loading_proc.terminate()
+                        try:
+                            await asyncio.wait_for(
+                                asyncio.to_thread(loading_proc.wait), timeout=1.0
+                            )
+                        except asyncio.TimeoutError:
+                            loading_proc.kill()
+                            await asyncio.to_thread(loading_proc.wait)
+                        print("[init] Stopped loading.gif after QR code screen loaded")
+                    except Exception as e:
+                        print(f"[init] Error stopping loading.gif: {e}")
+                        try:
+                            if loading_proc.poll() is None:
+                                loading_proc.kill()
+                        except Exception:
+                            pass
             except FileNotFoundError:
                 mpv_failed = True
                 print(
