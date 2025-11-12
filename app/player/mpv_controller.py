@@ -85,7 +85,7 @@ class MPVController:
                 input_default_bindings=True,
                 input_vo_keyboard=True,
                 osc=True,  # On-screen controller
-                border=False,  # Remove border
+                border=True,  # Remove border
                 window_dragging=False,  # Disable window dragging
                 keepaspect=True,  # Maintain aspect ratio (native size)
                 panscan=0.0,  # No pan/scan (native size)
