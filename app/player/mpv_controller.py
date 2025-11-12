@@ -81,7 +81,7 @@ class MPVController:
             self._player = mpv.MPV(
                 vo=vo,
                 ao=ao,
-                fullscreen=fullscreen,  # Don't force fullscreen - display at native size
+                fullscreen=True,  # Don't force fullscreen - display at native size
                 hwdec=hwdec,
                 input_default_bindings=True,
                 input_vo_keyboard=True,
