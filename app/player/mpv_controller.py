@@ -34,6 +34,7 @@ class MPVController:
             self._is_playing = False
             self._event_handlers: dict[str, list[Callable]] = {}
             self._loading_proc: Any | None = None  # Process for displaying loading.gif
+            self._loading_proc_pid: int | None = None  # PID of loading.gif process from init_flow
             self._background_tasks: set[asyncio.Task] = set()  # Keep track of background tasks
             self._event_loop: asyncio.AbstractEventLoop | None = None  # Store event loop reference
             self._initialized = True
@@ -590,7 +591,43 @@ class MPVController:
     async def _show_loading_gif(self) -> None:
         """Display loading.gif on TV when no media is playing."""
         if self._loading_proc is not None:
-            return  # Already showing
+            # Check if the process is still running
+            if self._loading_proc.poll() is None:
+                return  # Already showing and running
+            else:
+                # Process died, clear it
+                self._loading_proc = None
+        
+        # Check if init_flow left a loading.gif process running
+        import os
+        loading_pid_str = os.environ.get("MEDIA_BOT_LOADING_PID")
+        if loading_pid_str:
+            try:
+                loading_pid = int(loading_pid_str)
+                # Check if process is still running using a simple method
+                import subprocess
+                try:
+                    # Use kill -0 to check if process exists (doesn't actually kill it)
+                    result = subprocess.run(
+                        ["kill", "-0", str(loading_pid)],
+                        capture_output=True,
+                        timeout=0.1,
+                    )
+                    if result.returncode == 0:
+                        # Process exists, reuse it
+                        logger.info(f"Reusing existing loading.gif process (PID {loading_pid})")
+                        os.environ.pop("MEDIA_BOT_LOADING_PID", None)
+                        # Store PID for later cleanup
+                        self._loading_proc_pid = loading_pid
+                        # Create a dummy Popen-like object to track it
+                        # We'll use the PID directly in _hide_loading_gif
+                        return
+                except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
+                    # Process doesn't exist or kill command failed
+                    os.environ.pop("MEDIA_BOT_LOADING_PID", None)
+            except ValueError:
+                # Invalid PID
+                os.environ.pop("MEDIA_BOT_LOADING_PID", None)
         
         try:
             import subprocess
@@ -639,6 +676,24 @@ class MPVController:
         Actually terminate the loading.gif process to avoid running 2 MPV instances
         on Raspberry Pi, which causes performance issues.
         """
+        # Handle PID-based process from init_flow
+        if self._loading_proc_pid is not None:
+            try:
+                import subprocess
+                # Wait a tiny bit to ensure video is actually visible
+                await asyncio.sleep(0.2)
+                # Kill the process by PID
+                subprocess.run(
+                    ["kill", str(self._loading_proc_pid)],
+                    capture_output=True,
+                    timeout=1.0,
+                )
+                logger.info(f"Terminated loading.gif (PID {self._loading_proc_pid}) - video is now playing")
+                self._loading_proc_pid = None
+            except Exception as e:
+                logger.debug(f"Error terminating loading.gif by PID: {e}")
+                self._loading_proc_pid = None
+        
         if self._loading_proc is None:
             return
         
