@@ -1,10 +1,11 @@
 """RuTracker authorization screen."""
 
 import asyncio
-import io
 import logging
 import os
 import socket
+import subprocess
+from pathlib import Path
 
 import qrcode
 from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
@@ -22,7 +23,7 @@ from app.bot.screens.base import (
     ScreenHandlerResult,
     ScreenRenderResult,
 )
-from app.init_flow import ensure_rutracker_credentials
+from app.init_flow import _project_root, ensure_rutracker_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -37,14 +38,12 @@ def _detect_local_ip() -> str:
         return "127.0.0.1"
 
 
-def _generate_qr_image(url: str) -> io.BytesIO:
-    """Generate a QR code image for the given URL.
+def _generate_qr_png(url: str, out_path: Path) -> None:
+    """Generate a QR code PNG image for the given URL.
     
     Args:
         url: URL to encode in QR code
-        
-    Returns:
-        BytesIO object containing PNG image
+        out_path: Path where to save the PNG image
     """
     qr = qrcode.QRCode(
         version=1,
@@ -56,14 +55,59 @@ def _generate_qr_image(url: str) -> io.BytesIO:
     qr.make(fit=True)
     
     img = qr.make_image(fill_color="black", back_color="white")
-    img_bytes = io.BytesIO()
-    img.save(img_bytes, format="PNG")
-    img_bytes.seek(0)
-    return img_bytes
+    img.save(out_path)
+
+
+async def _display_with_mpv(image_path: Path) -> subprocess.Popen:
+    """Launch mpv to display the provided image fullscreen in a loop.
+    
+    Returns the process. The caller should wait for the image to actually load
+    before stopping any loading screens.
+    """
+    cmd = [
+        "mpv",
+        "--no-terminal",
+        "--force-window=yes",
+        "--image-display-duration=inf",
+        "--loop-file=inf",
+        "--fs",
+        "--no-border",
+        "--no-window-dragging",
+        "--no-input-default-bindings",
+        "--no-input-vo-keyboard",
+        "--keepaspect=no",  # Stretch to fill screen (no black bars)
+        "--video-unscaled=no",  # Allow scaling
+        "--panscan=1.0",  # Fill screen completely
+        "--video-margin-ratio-left=0",
+        "--video-margin-ratio-right=0",
+        "--video-margin-ratio-top=0",
+        "--video-margin-ratio-bottom=0",
+        "--fullscreen",
+        "--video-zoom=0",  # No zoom
+        "--video-pan-x=0",  # No horizontal pan
+        "--video-pan-y=0",  # No vertical pan
+        "--video-align-x=0",  # Center horizontally
+        "--video-align-y=0",  # Center vertically
+        str(image_path),
+    ]
+    # Start detached so we can kill later
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Wait for mpv to start and display the image
+    # Check process is running and wait for display to be ready
+    for _ in range(15):  # Check up to 1.5 seconds to ensure image is visible
+        await asyncio.sleep(0.1)
+        if proc.poll() is not None:
+            # Process exited, something went wrong
+            break
+    return proc
 
 
 class RuTrackerAuthScreen(Screen):
     """Screen for RuTracker authorization setup."""
+
+    def __init__(self):
+        """Initialize RuTracker auth screen."""
+        self._qr_proc: subprocess.Popen | None = None
 
     def get_name(self) -> str:
         """Get screen name."""
@@ -96,6 +140,30 @@ class RuTrackerAuthScreen(Screen):
         # Start setup server in background if not already running
         if os.environ.get("RUTRACKER_SETUP_ACTIVE") != "1":
             asyncio.create_task(ensure_rutracker_credentials())
+
+    async def on_exit(self, context: Context) -> None:
+        """Called when leaving the screen."""
+        # Close QR code display if it's showing
+        if self._qr_proc is not None:
+            try:
+                self._qr_proc.terminate()
+                try:
+                    await asyncio.wait_for(
+                        asyncio.to_thread(self._qr_proc.wait), timeout=1.0
+                    )
+                except asyncio.TimeoutError:
+                    self._qr_proc.kill()
+                    await asyncio.to_thread(self._qr_proc.wait)
+                self._qr_proc = None
+            except Exception as e:
+                logger.error(f"Error closing QR code display: {e}")
+                if self._qr_proc is not None:
+                    try:
+                        if self._qr_proc.poll() is None:
+                            self._qr_proc.kill()
+                    except Exception:
+                        pass
+                    self._qr_proc = None
 
     async def render(self, context: Context) -> ScreenRenderResult:
         """Render the RuTracker authorization screen."""
@@ -164,23 +232,44 @@ class RuTrackerAuthScreen(Screen):
             )
         
         elif query.data == RUTRACKER_AUTH_QR:
-            # Generate and send QR code
+            # Generate and display QR code on TV screen
             host_ip = _detect_local_ip()
             setup_url = f"http://{host_ip}:8766/"
             
             try:
-                qr_image = _generate_qr_image(setup_url)
-                await query.answer("Generating QR code...", show_alert=False)
+                await query.answer("Displaying QR code on screen...", show_alert=False)
                 
-                # Send QR code as photo
-                await query.message.reply_photo(
-                    photo=qr_image,
-                    caption=f"🏴‍☠️ *RuTracker Setup*\n\nScan this QR code to open the setup page:\n`{setup_url}`",
-                    parse_mode="Markdown",
-                )
+                # Close any existing QR code display
+                if self._qr_proc is not None:
+                    try:
+                        self._qr_proc.terminate()
+                        try:
+                            await asyncio.wait_for(
+                                asyncio.to_thread(self._qr_proc.wait), timeout=0.5
+                            )
+                        except asyncio.TimeoutError:
+                            self._qr_proc.kill()
+                            await asyncio.to_thread(self._qr_proc.wait)
+                    except Exception:
+                        pass
+                    self._qr_proc = None
+                
+                # Prepare QR code image path
+                project_root = _project_root()
+                tmp_dir = project_root / ".setup"
+                tmp_dir.mkdir(parents=True, exist_ok=True)
+                qr_png = tmp_dir / "rutracker_qr.png"
+                
+                # Generate QR code image
+                _generate_qr_png(setup_url, qr_png)
+                
+                # Display on TV screen using mpv
+                self._qr_proc = await _display_with_mpv(qr_png)
+                logger.info(f"Displaying RuTracker QR code on screen: {setup_url}")
+                
             except Exception as e:
-                logger.error(f"Error generating QR code: {e}")
-                await query.answer("Error generating QR code", show_alert=True)
+                logger.error(f"Error displaying QR code: {e}")
+                await query.answer("Error displaying QR code", show_alert=True)
             
             # Stay on current screen
             return None
