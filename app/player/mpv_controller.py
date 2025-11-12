@@ -19,6 +19,7 @@ class MPVController:
 
     _instance = None
     _lock = asyncio.Lock()
+    _seeking = False
 
     def __new__(cls):
         """Singleton pattern to ensure only one player instance."""
@@ -381,7 +382,17 @@ class MPVController:
         if not self._player:
             return False
 
+        async def unseek(self):
+            await asyncio.sleep(1.5)
+            self._seeking = False
+
         try:
+            if self._seeking:
+                return False
+
+            self._seeking = True
+            asyncio.create_task(unseek(self))
+
             if relative:
                 curr = await self.get_position()
                 res = curr + seconds
