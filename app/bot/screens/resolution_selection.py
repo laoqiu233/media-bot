@@ -243,8 +243,22 @@ async def _set_resolution(output_name: str, resolution: str) -> tuple[bool, str]
             return True, f"Resolution changed to {resolution}"
         else:
             error_msg = result.stderr or result.stdout or "Unknown error"
-            logger.error(f"Failed to set resolution: {error_msg.strip()}")
-            return False, f"Failed to set resolution: {error_msg.strip()}"
+            error_msg = error_msg.strip()
+            logger.error(f"Failed to set resolution: {error_msg}")
+            
+            # Create a user-friendly error message
+            # Check for common xrandr errors
+            if "cannot find mode" in error_msg.lower() or "badmatch" in error_msg.lower():
+                return False, f"Resolution {resolution} not available for {output_name}"
+            elif "X Error" in error_msg or "BadMatch" in error_msg:
+                return False, f"Resolution {resolution} not supported by display"
+            else:
+                # Return a concise error message (keep it short for Telegram)
+                # Extract first line or truncate
+                first_line = error_msg.split("\n")[0] if "\n" in error_msg else error_msg
+                if len(first_line) > 150:
+                    first_line = first_line[:147] + "..."
+                return False, f"Failed: {first_line}"
 
     except Exception as e:
         logger.error(f"Error setting resolution: {e}", exc_info=True)
@@ -349,7 +363,13 @@ class ResolutionSelectionScreen(Screen):
                     await query.answer(f"Resolution set to {resolution}")
                 else:
                     logger.error(f"Resolution change failed: {message}")
-                    await query.answer(message, show_alert=True)
+                    # Telegram has a 200 character limit for callback query answers
+                    # Truncate message if too long
+                    max_length = 200
+                    display_message = message
+                    if len(display_message) > max_length:
+                        display_message = display_message[:max_length - 3] + "..."
+                    await query.answer(display_message, show_alert=True)
 
                 # Return to system control after showing message
                 return Navigation(next_screen="system_control")
