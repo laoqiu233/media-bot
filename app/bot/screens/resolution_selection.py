@@ -38,15 +38,25 @@ class DisplayMode:
     def __str__(self) -> str:
         """Get string representation."""
         if self.refresh_rate:
-            return f"{self.resolution}@{self.refresh_rate}Hz"
+            # Format refresh rate nicely (remove trailing zeros)
+            rate = self.refresh_rate.rstrip("0").rstrip(".")
+            return f"{self.resolution}@{rate}Hz"
         return self.resolution
 
+    def get_mode_string(self) -> str:
+        """Get mode string for xrandr command."""
+        return self.resolution
 
-async def _get_connected_display() -> tuple[str | None, str | None]:
-    """Get connected display output name and current resolution.
+    def get_rate_string(self) -> str | None:
+        """Get rate string for xrandr command."""
+        return self.refresh_rate
+
+
+async def _get_connected_display() -> tuple[str | None, str | None, str | None]:
+    """Get connected display output name, current resolution, and refresh rate.
 
     Returns:
-        Tuple of (output_name, current_resolution) or (None, None)
+        Tuple of (output_name, current_resolution, current_rate) or (None, None, None)
     """
     try:
         loop = asyncio.get_event_loop()
@@ -64,12 +74,13 @@ async def _get_connected_display() -> tuple[str | None, str | None]:
 
         if result.returncode != 0:
             logger.warning(f"xrandr failed with return code {result.returncode}: {result.stderr}")
-            return None, None
+            return None, None, None
 
         logger.debug(f"xrandr output:\n{result.stdout}")
 
         current_output = None
         current_resolution = None
+        current_rate = None
 
         for line in result.stdout.splitlines():
             # Look for connected output line like:
@@ -95,16 +106,48 @@ async def _get_connected_display() -> tuple[str | None, str | None]:
                                     logger.debug(f"Found current resolution: {current_resolution}")
                                     break
 
+                        # Now find the current refresh rate by looking at the mode lines
+                        # We'll parse the next few lines to find the mode with *
                         break
 
-        logger.info(f"Connected display: {current_output}, Current resolution: {current_resolution}")
-        return current_output, current_resolution
+        # If we found a connected output, look for its current refresh rate
+        if current_output and current_resolution:
+            in_output_section = False
+            for line in result.stdout.splitlines():
+                if line.startswith(current_output):
+                    in_output_section = True
+                    continue
+                
+                # If we hit another output, stop
+                if in_output_section and re.match(r"^\w+-\d+", line):
+                    break
+                
+                # Look for mode line with current resolution and * marker
+                if in_output_section and line.startswith("   ") and current_resolution in line:
+                    # Format: "   1280x720      60.00*   50.00    59.94"
+                    parts = re.split(r"\s+", line.strip())
+                    if len(parts) >= 2 and parts[0] == current_resolution:
+                        # Find the refresh rate with *
+                        for refresh_part in parts[1:]:
+                            if "*" in refresh_part:
+                                current_rate = refresh_part.replace("*", "").replace("+", "").strip()
+                                logger.debug(f"Found current refresh rate: {current_rate}")
+                                break
+                    break
+
+        logger.info(
+            f"Connected display: {current_output}, "
+            f"Current resolution: {current_resolution}, "
+            f"Current rate: {current_rate}"
+        )
+        return current_output, current_resolution, current_rate
 
     except FileNotFoundError:
         logger.warning("xrandr utility not found. Install with: sudo apt install x11-xserver-utils")
+        return None, None, None
     except Exception as e:
         logger.error(f"Error getting connected display: {e}", exc_info=True)
-        return None, None
+        return None, None, None
 
 
 async def _get_available_resolutions(output_name: str) -> list[DisplayMode]:
@@ -138,6 +181,7 @@ async def _get_available_resolutions(output_name: str) -> list[DisplayMode]:
         # Parse xrandr output to find modes for the specified output
         in_output_section = False
         current_resolution = None
+        current_rate = None
 
         for line in result.stdout.splitlines():
             # Check if we're in the section for this output
@@ -162,10 +206,10 @@ async def _get_available_resolutions(output_name: str) -> list[DisplayMode]:
                 break
 
             # Parse mode lines (indented with spaces)
+            # Format can be:
+            # "   1920x1080     60.00*+   50.00    59.94    30.00"
+            # First part is resolution, rest are refresh rates
             if in_output_section and line.startswith("   "):
-                # Format: "   1920x1080     60.00*+"
-                # or:     "   1920x1080     60.00 +"
-                # or:     "   1920x1080     60.00"
                 line = line.strip()
                 logger.debug(f"Parsing mode line: {line}")
                 parts = re.split(r"\s+", line)
@@ -174,26 +218,40 @@ async def _get_available_resolutions(output_name: str) -> list[DisplayMode]:
                     resolution = parts[0]
                     # Check if it's a valid resolution format
                     if re.match(r"\d+x\d+", resolution):
-                        refresh_rate = None
-                        is_current = False
+                        # Parse all refresh rates for this resolution
+                        # Parts[1:] contains all refresh rates
+                        for refresh_part in parts[1:]:
+                            # Skip if it's not a number (could be indicators like +)
+                            if not re.match(r"^\d+\.?\d*", refresh_part):
+                                continue
 
-                        # Check for refresh rate and current indicator
-                        if len(parts) >= 2:
-                            refresh_part = parts[1]
-                            # Remove * (current) and + (preferred) indicators
+                            # Extract refresh rate (remove * and + indicators)
                             refresh_rate = refresh_part.replace("*", "").replace("+", "").strip()
-                            is_current = "*" in refresh_part
+                            
+                            # Check if this is the current mode
+                            # It's current if resolution matches AND has * marker
+                            is_current = False
+                            if resolution == current_resolution and "*" in refresh_part:
+                                is_current = True
+                                # Store the current rate for reference
+                                if not current_rate:
+                                    current_rate = refresh_rate
 
-                        # Use current resolution from output line if available
-                        if resolution == current_resolution:
-                            is_current = True
+                            logger.debug(
+                                f"Found mode: {resolution}, refresh: {refresh_rate}, current: {is_current}"
+                            )
+                            modes.append(DisplayMode(resolution, refresh_rate, is_current))
 
-                        logger.debug(f"Found mode: {resolution}, refresh: {refresh_rate}, current: {is_current}")
-                        modes.append(DisplayMode(resolution, refresh_rate, is_current))
-
-        # Sort modes: current first, then by resolution (largest first)
-        modes.sort(key=lambda m: (not m.current, -int(m.resolution.split("x")[0])), reverse=False)
-        logger.info(f"Found {len(modes)} available resolutions for {output_name}")
+        # Sort modes: current first, then by resolution (largest first), then by refresh rate
+        modes.sort(
+            key=lambda m: (
+                not m.current,
+                -int(m.resolution.split("x")[0]),
+                float(m.refresh_rate) if m.refresh_rate else 0,
+            ),
+            reverse=False,
+        )
+        logger.info(f"Found {len(modes)} available resolution/refresh combinations for {output_name}")
 
     except Exception as e:
         logger.error(f"Error getting available resolutions: {e}", exc_info=True)
@@ -201,12 +259,13 @@ async def _get_available_resolutions(output_name: str) -> list[DisplayMode]:
     return modes
 
 
-async def _set_resolution(output_name: str, resolution: str) -> tuple[bool, str]:
+async def _set_resolution(output_name: str, resolution: str, refresh_rate: str | None = None) -> tuple[bool, str]:
     """Set display resolution using xrandr.
 
     Args:
         output_name: Display output name (e.g., "HDMI-1")
         resolution: Resolution string (e.g., "1920x1080")
+        refresh_rate: Refresh rate string (e.g., "60.00") - optional
 
     Returns:
         Tuple of (success, message)
@@ -214,11 +273,14 @@ async def _set_resolution(output_name: str, resolution: str) -> tuple[bool, str]
     try:
         loop = asyncio.get_event_loop()
 
-        logger.info(f"Setting resolution to {resolution} for output {output_name}")
+        logger.info(f"Setting resolution to {resolution}" + (f" @ {refresh_rate}Hz" if refresh_rate else "") + f" for output {output_name}")
 
         # Use xrandr to set the resolution
-        # Format: xrandr --output <output> --mode <resolution>
+        # Format: xrandr --output <output> --mode <resolution> [--rate <refresh_rate>]
         cmd = ["xrandr", "--output", output_name, "--mode", resolution]
+        if refresh_rate:
+            cmd.extend(["--rate", refresh_rate])
+        
         logger.debug(f"Running command: {' '.join(cmd)}")
 
         result = await loop.run_in_executor(
@@ -239,8 +301,9 @@ async def _set_resolution(output_name: str, resolution: str) -> tuple[bool, str]
             logger.debug(f"xrandr stderr: {result.stderr}")
 
         if result.returncode == 0:
-            logger.info(f"Successfully set resolution to {resolution} for {output_name}")
-            return True, f"Resolution changed to {resolution}"
+            rate_str = f" @ {refresh_rate}Hz" if refresh_rate else ""
+            logger.info(f"Successfully set resolution to {resolution}{rate_str} for {output_name}")
+            return True, f"Resolution changed to {resolution}{rate_str}"
         else:
             error_msg = result.stderr or result.stdout or "Unknown error"
             error_msg = error_msg.strip()
@@ -281,7 +344,7 @@ class ResolutionSelectionScreen(Screen):
         Returns:
             Tuple of (text, keyboard, options)
         """
-        output_name, current_res = await _get_connected_display()
+        output_name, current_res, current_rate = await _get_connected_display()
 
         text = "🖥 *Resolution Selection*\n\n"
 
@@ -317,12 +380,15 @@ class ResolutionSelectionScreen(Screen):
             if mode.current:
                 button_text = f"✓ {button_text} (Current)"
 
+            # Include both resolution and refresh rate in callback data
+            # Format: "output:resolution:rate" or "output:resolution" if no rate
+            if mode.refresh_rate:
+                callback_data = f"{RESOLUTION_SELECT}{output_name}:{mode.resolution}:{mode.refresh_rate}"
+            else:
+                callback_data = f"{RESOLUTION_SELECT}{output_name}:{mode.resolution}"
+
             keyboard.append(
-                [
-                    InlineKeyboardButton(
-                        button_text, callback_data=f"{RESOLUTION_SELECT}{output_name}:{mode.resolution}"
-                    )
-                ]
+                [InlineKeyboardButton(button_text, callback_data=callback_data)]
             )
 
         keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data=RESOLUTION_BACK)])
@@ -347,7 +413,7 @@ class ResolutionSelectionScreen(Screen):
             return Navigation(next_screen="system_control")
 
         elif query.data.startswith(RESOLUTION_SELECT):
-            # Format: "resolution:select:HDMI-1:1920x1080"
+            # Format: "resolution:select:HDMI-1:1920x1080:60.00" or "resolution:select:HDMI-1:1920x1080"
             data = query.data[len(RESOLUTION_SELECT) :]
             logger.debug(f"Resolution selection callback data: {data}")
             parts = data.split(":")
@@ -355,12 +421,18 @@ class ResolutionSelectionScreen(Screen):
             if len(parts) >= 2:
                 output_name = parts[0]
                 resolution = parts[1]
-                logger.info(f"Attempting to set resolution: {resolution} for output: {output_name}")
-                success, message = await _set_resolution(output_name, resolution)
+                refresh_rate = parts[2] if len(parts) >= 3 else None
+                
+                logger.info(
+                    f"Attempting to set resolution: {resolution}"
+                    + (f" @ {refresh_rate}Hz" if refresh_rate else "")
+                    + f" for output: {output_name}"
+                )
+                success, message = await _set_resolution(output_name, resolution, refresh_rate)
 
                 if success:
                     logger.info(f"Resolution change successful: {message}")
-                    await query.answer(f"Resolution set to {resolution}")
+                    await query.answer(f"Resolution set to {resolution}" + (f" @ {refresh_rate}Hz" if refresh_rate else ""))
                 else:
                     logger.error(f"Resolution change failed: {message}")
                     # Telegram has a 200 character limit for callback query answers
@@ -374,7 +446,7 @@ class ResolutionSelectionScreen(Screen):
                 # Return to system control after showing message
                 return Navigation(next_screen="system_control")
             else:
-                logger.warning(f"Invalid resolution data format: {data} (expected 'output:resolution')")
+                logger.warning(f"Invalid resolution data format: {data} (expected 'output:resolution[:rate]')")
                 await query.answer("Invalid resolution data", show_alert=True)
 
         return None
