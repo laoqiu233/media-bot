@@ -16,6 +16,7 @@ from app.bot.screens import (
     TorrentResultsScreen,
     TVScreen,
 )
+from app.bot.screens.smart_rewind import SmartRewindScreen
 from app.library.imdb_client import IMDbClient
 from app.library.manager import LibraryManager
 from app.player.mpv_controller import MPVController
@@ -42,6 +43,7 @@ class ScreenRegistry:
         self.library_screen = LibraryScreen(library_manager, mpv_controller)
         self.downloads_screen = DownloadsScreen(torrent_downloader)
         self.player_screen = PlayerScreen(mpv_controller)
+        self.smart_rewind_screen = SmartRewindScreen(mpv_controller)
         self.status_screen = StatusScreen(mpv_controller, cec_controller, torrent_downloader, library_manager)
         self.tv_screen = TVScreen(cec_controller)
         self.setup_confirmation_screen = SetupConfirmationScreen()
@@ -58,6 +60,7 @@ class ScreenRegistry:
             self.library_screen,
             self.downloads_screen,
             self.player_screen,
+            self.smart_rewind_screen,
             self.status_screen,
             self.tv_screen,
             self.setup_confirmation_screen,
