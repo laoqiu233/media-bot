@@ -82,8 +82,9 @@ async def initialize_components():
             ao=config.mpv.ao,
             fullscreen=config.mpv.fullscreen,
             hwdec=config.mpv.hwdec,
+            downloader=torrent_downloader,  # Pass downloader for auto-pause/resume
         )
-        logger.info("MPV player initialized")
+        logger.info("MPV player initialized with downloader integration")
     except Exception as e:
         logger.warning(f"MPV initialization failed: {e}")
 

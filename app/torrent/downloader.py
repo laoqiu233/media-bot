@@ -356,6 +356,44 @@ class TorrentDownloader:
             logger.error(f"Error resuming download: {e}")
             return False
 
+    async def pause_all_downloads(self) -> int:
+        """Pause all active downloads.
+
+        Returns:
+            Number of downloads paused
+        """
+        paused_count = 0
+        for task_id, state in list(self.downloads.items()):
+            try:
+                if state.handle.is_valid():
+                    state.handle.pause()
+                    paused_count += 1
+            except Exception as e:
+                logger.error(f"Error pausing download {task_id}: {e}")
+
+        if paused_count > 0:
+            logger.info(f"Paused all downloads ({paused_count} downloads paused)")
+        return paused_count
+
+    async def resume_all_downloads(self) -> int:
+        """Resume all paused downloads.
+
+        Returns:
+            Number of downloads resumed
+        """
+        resumed_count = 0
+        for task_id, state in list(self.downloads.items()):
+            try:
+                if state.handle.is_valid():
+                    state.handle.resume()
+                    resumed_count += 1
+            except Exception as e:
+                logger.error(f"Error resuming download {task_id}: {e}")
+
+        if resumed_count > 0:
+            logger.info(f"Resumed all downloads ({resumed_count} downloads resumed)")
+        return resumed_count
+
     async def remove_download(self, task_id: str, delete_files: bool = False) -> bool:
         """Remove a download.
 

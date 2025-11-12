@@ -37,6 +37,7 @@ class MPVController:
             self._loading_proc_pid: int | None = None  # PID of loading.gif process from init_flow
             self._background_tasks: set[asyncio.Task] = set()  # Keep track of background tasks
             self._event_loop: asyncio.AbstractEventLoop | None = None  # Store event loop reference
+            self._downloader: Any | None = None  # Torrent downloader reference for pause/resume
             self._initialized = True
 
     def initialize(
@@ -45,6 +46,7 @@ class MPVController:
         ao: str = "alsa",
         hwdec: str = "auto",
         fullscreen: bool = True,
+        downloader: Any | None = None,
     ):
         """Initialize the MPV player with configuration.
 
@@ -53,7 +55,9 @@ class MPVController:
             ao: Audio output driver
             fullscreen: Start in fullscreen mode
             hwdec: Hardware decoding mode
+            downloader: Optional torrent downloader instance for auto-pause/resume
         """
+        self._downloader = downloader
         if mpv is None:
             raise RuntimeError(
                 "python-mpv is not installed. Please install it: pip install python-mpv"
@@ -104,8 +108,18 @@ class MPVController:
                 self._is_playing = False
                 self._current_file = None
                 self._trigger_event("playback_finished", event)
-                # Show loading.gif when playback ends - wait for video to fully stop
-                async def show_loading_after_delay():
+                
+                # Resume all downloads when playback ends
+                async def resume_downloads_and_show_loading():
+                    # Resume downloads first
+                    if self._downloader is not None:
+                        try:
+                            resumed_count = await self._downloader.resume_all_downloads()
+                            if resumed_count > 0:
+                                logger.info(f"Resumed {resumed_count} downloads after playback ended")
+                        except Exception as e:
+                            logger.error(f"Error resuming downloads after playback: {e}")
+                    
                     # Wait 1.5 seconds for video to fully stop before showing loading.gif
                     await asyncio.sleep(1.5)
                     await self._show_loading_gif()
@@ -118,11 +132,11 @@ class MPVController:
                         loop = asyncio.get_running_loop()
                         self._event_loop = loop
                     except RuntimeError:
-                        logger.error("No event loop available for showing loading gif")
+                        logger.error("No event loop available for resuming downloads and showing loading gif")
                         return
                 
                 # Create task in the running loop (fire and forget)
-                task = loop.create_task(show_loading_after_delay())
+                task = loop.create_task(resume_downloads_and_show_loading())
                 # Store task to prevent garbage collection and "never awaited" warning
                 self._background_tasks.add(task)
                 # Remove task when it completes
@@ -201,6 +215,15 @@ class MPVController:
             async with self._lock:
                 logger.info(f"Starting playback of: {file_path}")
                 logger.info(f"File size: {file_path.stat().st_size / (1024*1024):.2f} MB")
+
+                # Pause all downloads when playback starts
+                if self._downloader is not None:
+                    try:
+                        paused_count = await self._downloader.pause_all_downloads()
+                        if paused_count > 0:
+                            logger.info(f"Paused {paused_count} downloads for playback")
+                    except Exception as e:
+                        logger.error(f"Error pausing downloads for playback: {e}")
 
                 # Load and play the file first (this will switch to video screen)
                 # The file-loaded event will handle stopping loading.gif
