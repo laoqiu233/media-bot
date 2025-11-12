@@ -12,6 +12,7 @@ from app.bot.callback_data import (
     PLAYER_RESUME,
     PLAYER_SEEK,
     PLAYER_STOP,
+    PLAYER_TRACKS,
     PLAYER_VOL_DOWN,
     PLAYER_VOL_UP,
     TV_VOL_DOWN,
@@ -112,6 +113,9 @@ class PlayerScreen(Screen):
                         InlineKeyboardButton("🔊 TV Volume +5", callback_data=TV_VOL_UP),
                     ],
                     [
+                        InlineKeyboardButton("🎵 Audio Tracks", callback_data=PLAYER_TRACKS),
+                    ],
+                    [
                         InlineKeyboardButton("« Back to Menu", callback_data=PLAYER_BACK),
                     ],
                 ]
@@ -189,6 +193,15 @@ class PlayerScreen(Screen):
                 await query.answer("TV control not available", show_alert=True)
                 return None
             await self._tv_volume_down(query)
+
+        elif query.data == PLAYER_TRACKS:
+            # Check if media is playing
+            status = await self.player.get_status()
+            if not status.get("current_file"):
+                await query.answer("No media is currently playing", show_alert=True)
+                return None
+            # Navigate to audio track selection screen
+            return Navigation(next_screen="audio_track_selection")
 
         elif query.data.startswith(PLAYER_SEEK):
             try:

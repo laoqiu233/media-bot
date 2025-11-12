@@ -1,6 +1,7 @@
 """Screen-based UI system for the bot."""
 
 from app.bot.screens.audio_output_selection import AudioOutputSelectionScreen
+from app.bot.screens.audio_track_selection import AudioTrackSelectionScreen
 from app.bot.screens.base import Screen
 from app.bot.screens.downloads import DownloadsScreen
 from app.bot.screens.hdmi_port_selection import HDMIPortSelectionScreen
@@ -19,6 +20,7 @@ from app.bot.screens.tv import TVScreen
 
 __all__ = [
     "AudioOutputSelectionScreen",
+    "AudioTrackSelectionScreen",
     "Screen",
     "DownloadsScreen",
     "HDMIPortSelectionScreen",
