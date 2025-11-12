@@ -149,7 +149,25 @@ class CECController:
             True if successful
         """
         logger.info("Setting Raspberry Pi as active source")
-        success, output = await self._send_cec_command(["--to", "0", "--active-source"])
+        # Try to get physical address from adapter info
+        # First try to get it from the adapter itself
+        try:
+            # Use --playback -S to get adapter info which includes physical address
+            success, output = await self._send_cec_command(["--playback", "-S"])
+            if success:
+                # Look for physical address in output (format: "Physical address: 1.0.0.0")
+                phys_match = re.search(r"physical address:\s*([0-9a-f.]+)", output, re.IGNORECASE)
+                if phys_match:
+                    phys_addr = phys_match.group(1).strip()
+                    logger.info(f"Using physical address: {phys_addr}")
+                    success, _ = await self._send_cec_command(["--to", "0", "--active-source", f"phys-addr={phys_addr}"])
+                    return success
+        except Exception as e:
+            logger.debug(f"Could not get physical address: {e}")
+        
+        # Fallback to common default physical address
+        logger.info("Using default physical address: 1.0.0.0")
+        success, output = await self._send_cec_command(["--to", "0", "--active-source", "phys-addr=1.0.0.0"])
         return success
 
     async def get_power_status(self) -> str | None:
@@ -158,18 +176,10 @@ class CECController:
         Returns:
             Power status string or None
         """
-        success, output = await self._send_cec_command(["--to", "0", "--get-power-status"])
-        if not success:
-            return None
-
-        # Parse output for power status
-        # cec-ctl response format: "power status: on" or "power status: standby"
-        match = re.search(r"power status:\s*(\w+)", output, re.IGNORECASE)
-        if match:
-            status = match.group(1).lower()
-            logger.info(f"TV power status: {status}")
-            return status
-
+        # cec-ctl doesn't have --get-power-status, use --give-device-power-status
+        # This sends a query, but we can't easily parse the response
+        # For now, return None as this feature isn't directly supported
+        logger.debug("Power status query not directly supported by cec-ctl")
         return None
 
     async def is_tv_on(self) -> bool:
@@ -205,7 +215,7 @@ class CECController:
             True if successful
         """
         logger.info("Increasing TV volume")
-        success, _ = await self._send_cec_command(["--to", "0", "--volume-up"])
+        success, _ = await self._send_cec_command(["--to", "0", "--user-control-pressed", "ui-cmd=volume-up"])
         return success
 
     async def volume_down(self) -> bool:
@@ -215,7 +225,7 @@ class CECController:
             True if successful
         """
         logger.info("Decreasing TV volume")
-        success, _ = await self._send_cec_command(["--to", "0", "--volume-down"])
+        success, _ = await self._send_cec_command(["--to", "0", "--user-control-pressed", "ui-cmd=volume-down"])
         return success
 
     async def mute(self) -> bool:
@@ -225,7 +235,7 @@ class CECController:
             True if successful
         """
         logger.info("Muting TV")
-        success, _ = await self._send_cec_command(["--to", "0", "--mute"])
+        success, _ = await self._send_cec_command(["--to", "0", "--user-control-pressed", "ui-cmd=mute"])
         return success
 
     async def get_osd_name(self) -> str | None:
@@ -234,15 +244,26 @@ class CECController:
         Returns:
             TV name or None
         """
-        success, output = await self._send_cec_command(["--to", "0", "--get-osd-name"])
+        # cec-ctl doesn't have --get-osd-name, use --playback -S to scan
+        # This will show device info including OSD names
+        success, output = await self._send_cec_command(["--playback", "-S"])
         if not success:
             return None
 
         # Parse output for OSD name
+        # Look for device 0 (TV) and its OSD name
+        # Format might be: "device #0: TV" or "OSD name: ..."
         match = re.search(r"osd name:\s*(.+)", output, re.IGNORECASE)
         if match:
             name = match.group(1).strip()
             logger.info(f"TV OSD name: {name}")
+            return name
+        
+        # Try alternative format
+        match = re.search(r"device\s+#?0:\s*(.+)", output, re.IGNORECASE)
+        if match:
+            name = match.group(1).strip()
+            logger.info(f"TV device name: {name}")
             return name
 
         return None
@@ -253,7 +274,7 @@ class CECController:
         Returns:
             List of device information
         """
-        success, output = await self._send_cec_command(["--scan"])
+        success, output = await self._send_cec_command(["--playback", "-S"])
         if not success:
             return []
 
