@@ -194,5 +194,3 @@ class PlayerScreen(Screen):
                 await query.answer(f"{direction} Seeked {abs_seconds}s" if success else "Failed")
             except ValueError:
                 await query.answer("Invalid seek value", show_alert=True)
-        elif query.data == PLAYER_SMART_REWIND:
-            return Navigation(next_screen="smart_rewind")
