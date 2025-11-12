@@ -69,6 +69,10 @@ class MPVController:
                 input_default_bindings=True,
                 input_vo_keyboard=True,
                 osc=True,  # On-screen controller
+                border=False,  # Remove border
+                window_dragging=False,  # Disable window dragging
+                keepaspect=False,  # Stretch to fill screen (no black bars)
+                panscan=1.0,  # Fill screen completely
             )
 
             # Register event handlers
@@ -143,13 +147,10 @@ class MPVController:
 
         try:
             async with self._lock:
-                # Hide loading.gif when starting playback
-                await self._hide_loading_gif()
-                
                 logger.info(f"Starting playback of: {file_path}")
                 logger.info(f"File size: {file_path.stat().st_size / (1024*1024):.2f} MB")
 
-                # Load and play the file
+                # Load and play the file first (this will switch to video screen)
                 self._player.loadfile(str(file_path))
                 self._current_file = file_path
 
@@ -157,8 +158,14 @@ class MPVController:
                 self._player.pause = False
                 self._is_playing = True
 
-                # Give MPV a moment to start
-                await asyncio.sleep(0.5)
+                # Give MPV a moment to start and switch to video
+                await asyncio.sleep(0.3)
+                
+                # Hide loading.gif after video screen is active (reduces gap)
+                await self._hide_loading_gif()
+                
+                # Additional small delay to ensure smooth transition
+                await asyncio.sleep(0.2)
 
                 # Verify playback actually started
                 try:
@@ -531,6 +538,13 @@ class MPVController:
                 "--image-display-duration=inf",
                 "--loop-file=inf",
                 "--fs",
+                "--no-border",
+                "--no-window-dragging",
+                "--no-input-default-bindings",
+                "--no-input-vo-keyboard",
+                "--keepaspect=no",  # Stretch to fill screen (no black bars)
+                "--video-unscaled=no",  # Allow scaling
+                "--panscan=1.0",  # Fill screen completely
                 str(loading_path),
             ]
             self._loading_proc = subprocess.Popen(

@@ -608,37 +608,7 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     # Paste QR codes on white backgrounds
     img.paste(wifi_qr, (wifi_qr_x, qr_y))
     img.paste(url_qr, (url_qr_x, qr_y))
-    
-    # Add loading.gif in bottom corner if available (for TV display)
-    loading_path = _project_root() / "loading.gif"
-    if loading_path.exists():
-        try:
-            loading_img = Image.open(loading_path)
-            # Convert to RGB if needed
-            if loading_img.mode != "RGB":
-                loading_img = loading_img.convert("RGB")
-            # Resize loading.gif to reasonable size (about 120x120)
-            loading_size = 120
-            loading_img = loading_img.resize((loading_size, loading_size), Image.Resampling.LANCZOS)
-            # Position in bottom-right corner with padding
-            loading_x = width - loading_size - padding
-            loading_y = height - loading_size - padding
-            # Paste loading.gif
-            img.paste(loading_img, (loading_x, loading_y))
-            
-            # Add "Waiting for WiFi connection..." text near loading.gif
-            loading_text = "Waiting for WiFi connection..."
-            loading_text_bbox = draw.textbbox((0, 0), loading_text, font=font_text)
-            loading_text_width = loading_text_bbox[2] - loading_text_bbox[0]
-            loading_text_x = loading_x + (loading_size - loading_text_width) // 2
-            loading_text_y = loading_y - 35
-            # Text shadow
-            draw.text((loading_text_x + 1, loading_text_y + 1), loading_text, fill=(0, 0, 0), font=font_text)
-            # Main text
-            draw.text((loading_text_x, loading_text_y), loading_text, fill=(148, 220, 255), font=font_text)
-        except Exception as e:
-            print(f"[init] Could not add loading.gif to QR screen: {e}")
-    
+        
     # Stunning text below QR codes with glow effects
     text_y = qr_y + qr_size + section_padding
     wifi_text = f"SSID: {ap_ssid}\nPassword: {ap_password}"
@@ -720,6 +690,13 @@ async def _display_with_mpv(image_path: Path) -> subprocess.Popen:
         "--image-display-duration=inf",
         "--loop-file=inf",
         "--fs",
+        "--no-border",
+        "--no-window-dragging",
+        "--no-input-default-bindings",
+        "--no-input-vo-keyboard",
+        "--keepaspect=no",  # Stretch to fill screen (no black bars)
+        "--video-unscaled=no",  # Allow scaling
+        "--panscan=1.0",  # Fill screen completely
         str(image_path),
     ]
     # Start detached so we can kill later
@@ -947,6 +924,16 @@ async def ensure_telegram_token(force: bool = False) -> None:
         # Store setup server info for loading.gif access
         os.environ["SETUP_SERVER_PORT"] = str(bound_port)
         os.environ["SETUP_SERVER_HOST"] = ap_ip
+        # Show loading.gif while generating QR codes
+        loading_proc: subprocess.Popen | None = None
+        loading_path = _project_root() / "loading.gif"
+        if loading_path.exists():
+            try:
+                loading_proc = await _display_with_mpv(loading_path)
+                print("[init] Showing loading.gif while generating QR codes...")
+            except Exception as e:
+                print(f"[init] Could not show loading.gif: {e}")
+
         # Prepare QR image under project data dir
         project = _project_root()
         tmp_dir = project / ".setup"
@@ -955,6 +942,15 @@ async def ensure_telegram_token(force: bool = False) -> None:
         # Generate dual QR (Wi‑Fi join + setup URL)
         qr_png = tmp_dir / "setup_qr.png"
         _generate_composite_qr(setup_url, current_ap_ssid, current_ap_password, qr_png)
+        
+        # Hide loading.gif before showing QR codes
+        if loading_proc and loading_proc.poll() is None:
+            try:
+                loading_proc.terminate()
+                loading_proc.wait(timeout=1)
+            except Exception:
+                pass
+        
         try:
             # Try to show QR with mpv; fallback to printing URL if mpv missing
             try:
