@@ -3,7 +3,7 @@
 import logging
 from pathlib import Path
 
-from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.bot.callback_data import (
     PLAYER_BACK,
@@ -11,7 +11,6 @@ from app.bot.callback_data import (
     PLAYER_PAUSE,
     PLAYER_RESUME,
     PLAYER_SEEK,
-    PLAYER_SMART_REWIND,
     PLAYER_STOP,
     PLAYER_VOL_DOWN,
     PLAYER_VOL_UP,
@@ -97,7 +96,6 @@ class PlayerScreen(Screen):
                         InlineKeyboardButton("⏪ -30s", callback_data=f"{PLAYER_SEEK}-30"),
                         InlineKeyboardButton("⏩ +30s", callback_data=f"{PLAYER_SEEK}30"),
                     ],
-                    [InlineKeyboardButton("⏪⏩ Smart rewind", callback_data=PLAYER_SMART_REWIND)],
                     [
                         InlineKeyboardButton("🔉 Vol -", callback_data=PLAYER_VOL_DOWN),
                         InlineKeyboardButton("🔊 Vol +", callback_data=PLAYER_VOL_UP),
@@ -137,6 +135,23 @@ class PlayerScreen(Screen):
         filled = int((progress / 100) * length)
         empty = length - filled
         return f"[{'█' * filled}{'░' * empty}]"
+
+    async def handle_message(self, message: Message, context: Context) -> ScreenHandlerResult:
+        text = message.text.strip()
+        neg = text.startswith('-')
+        if text.startswith('-') or text.startswith('+'):
+            text = text[1:]
+        mul = 1
+        if text.endswith('m'):
+            mul = 60
+            text = text[:-1]
+        elif text.endswith('s'):
+            text = text[:-1]
+        amount = int(text)
+        amount = mul * amount
+        if neg:
+            amount = -amount
+        await self.player.seek(amount, relative=True)
 
     async def handle_callback(
         self,
