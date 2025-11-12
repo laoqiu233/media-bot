@@ -14,6 +14,8 @@ from app.bot.callback_data import (
     PLAYER_STOP,
     PLAYER_VOL_DOWN,
     PLAYER_VOL_UP,
+    TV_VOL_DOWN,
+    TV_VOL_UP,
 )
 from app.bot.screens.base import (
     Context,
@@ -30,14 +32,15 @@ logger = logging.getLogger(__name__)
 class PlayerScreen(Screen):
     """Screen for controlling media playback."""
 
-    def __init__(self, player):
+    def __init__(self, player, cec_controller=None):
         """Initialize player screen.
 
         Args:
-            screen_manager: Screen manager instance
             player: MPV player controller
+            cec_controller: CEC controller for TV volume control (optional)
         """
         self.player = player
+        self.cec = cec_controller
 
     def get_name(self) -> str:
         """Get screen name."""
@@ -97,8 +100,16 @@ class PlayerScreen(Screen):
                         InlineKeyboardButton("⏩ +30s", callback_data=f"{PLAYER_SEEK}30"),
                     ],
                     [
-                        InlineKeyboardButton("🔉 Vol -", callback_data=PLAYER_VOL_DOWN),
-                        InlineKeyboardButton("🔊 Vol +", callback_data=PLAYER_VOL_UP),
+                        InlineKeyboardButton("⏪⏪ -5m", callback_data=f"{PLAYER_SEEK}-300"),
+                        InlineKeyboardButton("⏩⏩ +5m", callback_data=f"{PLAYER_SEEK}300"),
+                    ],
+                    [
+                        InlineKeyboardButton("🔉 Player Volume -5", callback_data=PLAYER_VOL_DOWN),
+                        InlineKeyboardButton("🔊 Player Volume +5", callback_data=PLAYER_VOL_UP),
+                    ],
+                    [
+                        InlineKeyboardButton("🔉 TV Volume -5", callback_data=TV_VOL_DOWN),
+                        InlineKeyboardButton("🔊 TV Volume +5", callback_data=TV_VOL_UP),
                     ],
                     [
                         InlineKeyboardButton("« Back to Menu", callback_data=PLAYER_BACK),
@@ -178,11 +189,23 @@ class PlayerScreen(Screen):
 
         elif query.data == PLAYER_VOL_UP:
             success = await self.player.volume_up()
-            await query.answer("🔊 Volume up" if success else "Failed")
+            await query.answer("🔊 Player volume up +5" if success else "Failed")
 
         elif query.data == PLAYER_VOL_DOWN:
             success = await self.player.volume_down()
-            await query.answer("🔉 Volume down" if success else "Failed")
+            await query.answer("🔉 Player volume down -5" if success else "Failed")
+
+        elif query.data == TV_VOL_UP:
+            if not self.cec:
+                await query.answer("TV control not available", show_alert=True)
+                return None
+            await self._tv_volume_up(query)
+
+        elif query.data == TV_VOL_DOWN:
+            if not self.cec:
+                await query.answer("TV control not available", show_alert=True)
+                return None
+            await self._tv_volume_down(query)
 
         elif query.data.startswith(PLAYER_SEEK):
             try:
@@ -194,3 +217,29 @@ class PlayerScreen(Screen):
                 await query.answer(f"{direction} Seeked {abs_seconds}s" if success else "Failed")
             except ValueError:
                 await query.answer("Invalid seek value", show_alert=True)
+
+    async def _tv_volume_up(self, query: CallbackQuery) -> None:
+        """Handle TV volume up.
+
+        Args:
+            query: Callback query
+        """
+        try:
+            success = await self.cec.volume_up()
+            await query.answer("🔊 TV volume up +5" if success else "Failed")
+        except Exception as e:
+            logger.error(f"Error increasing TV volume: {e}")
+            await query.answer("Error", show_alert=True)
+
+    async def _tv_volume_down(self, query: CallbackQuery) -> None:
+        """Handle TV volume down.
+
+        Args:
+            query: Callback query
+        """
+        try:
+            success = await self.cec.volume_down()
+            await query.answer("🔉 TV volume down -5" if success else "Failed")
+        except Exception as e:
+            logger.error(f"Error decreasing TV volume: {e}")
+            await query.answer("Error", show_alert=True)
