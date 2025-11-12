@@ -87,8 +87,8 @@ class MPVController:
                 osc=True,  # On-screen controller
                 border=False,  # Remove border
                 window_dragging=False,  # Disable window dragging
-                keepaspect=False,  # Stretch to fill screen (no black bars)
-                panscan=1.0,  # Fill screen completely
+                keepaspect=True,  # Maintain aspect ratio (native size)
+                panscan=0.0,  # No pan/scan (native size)
             )
 
             # Register event handlers
@@ -102,8 +102,9 @@ class MPVController:
                 self._is_playing = False
                 self._current_file = None
                 self._trigger_event("playback_finished", event)
-                # Show loading.gif when playback ends - wait a bit for video to fully stop
+                # Show loading.gif when playback ends - wait for video to fully stop
                 async def show_loading_after_delay():
+                    # Wait 1.5 seconds for video to fully stop before showing loading.gif
                     await asyncio.sleep(1.5)
                     await self._show_loading_gif()
                 
@@ -307,7 +308,7 @@ class MPVController:
             self._is_playing = False
             self._current_file = None
             logger.info("Playback stopped")
-            # Wait a bit for video to fully stop before showing loading.gif
+            # Wait 1.5 seconds for video to fully stop and disappear before showing loading.gif
             await asyncio.sleep(1.5)
             await self._show_loading_gif()
             return True
