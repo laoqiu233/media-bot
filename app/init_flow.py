@@ -846,7 +846,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
         return True, None
 
     async def run_flow():
-        nonlocal mpv_proc, mpv_failed, current_ap_ssid, current_ap_password
+        nonlocal mpv_proc, mpv_failed, current_ap_ssid, current_ap_password, loading_proc, loading_path
         # Ensure hotspot is up BEFORE generating QR
         current_ap_ssid = os.getenv("SETUP_AP_SSID", "media-bot-setup")
         current_ap_password = os.getenv("SETUP_AP_PASSWORD", "mediabot1234")
