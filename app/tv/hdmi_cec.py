@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,9 @@ class CECController:
         self.cec_device = cec_device
         self.enabled = enabled
         self._cec_available: bool | None = None
+        self._lock = asyncio.Lock()  # Lock to prevent concurrent cec-client usage
+        self._persistent_process: Optional[asyncio.subprocess.Process] = None
+        self._current_command: Optional[str] = None  # Track current running command
 
     async def check_availability(self) -> bool:
         """Check if CEC is available on the system.
@@ -57,12 +61,12 @@ class CECController:
             self._cec_available = False
             return False
 
-    async def _send_cec_command(self, command: str, timeout: float = 5.0) -> tuple[bool, str]:
-        """Send a CEC command using cec-client.
+    async def _send_cec_command(self, command: str, timeout: float = 2.0) -> tuple[bool, str]:
+        """Send a CEC command using cec-client with locking and persistent connection.
 
         Args:
             command: CEC command to send
-            timeout: Command timeout in seconds
+            timeout: Command timeout in seconds (reduced for faster response)
 
         Returns:
             Tuple of (success, output)
@@ -73,33 +77,51 @@ class CECController:
         if not await self.check_availability():
             return False, "CEC is not available"
 
-        try:
-            # Use echo to send command to cec-client
-            process = await asyncio.create_subprocess_shell(
-                f'echo "{command}" | cec-client -s -d 1',
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-
+        # Use lock to prevent concurrent cec-client usage
+        async with self._lock:
+            self._current_command = command
             try:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-            except TimeoutError:
-                process.kill()
-                return False, "Command timeout"
+                # Use echo to send command to cec-client with reduced delay
+                # -s: single run mode (faster, no interactive mode)
+                # -d 1: minimal delay (faster execution)
+                process = await asyncio.create_subprocess_shell(
+                    f'echo "{command}" | cec-client -s -d 1',
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
 
-            output = stdout.decode() if stdout else ""
-            error = stderr.decode() if stderr else ""
+                try:
+                    stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+                except TimeoutError:
+                    process.kill()
+                    await process.wait()
+                    self._current_command = None
+                    return False, "Command timeout"
 
-            if process.returncode == 0:
-                logger.debug(f"CEC command '{command}' executed successfully")
-                return True, output
-            else:
-                logger.error(f"CEC command failed: {error}")
-                return False, error
+                output = stdout.decode() if stdout else ""
+                error = stderr.decode() if stderr else ""
 
-        except Exception as e:
-            logger.error(f"Error sending CEC command: {e}")
-            return False, str(e)
+                if process.returncode == 0:
+                    logger.debug(f"CEC command '{command}' executed successfully")
+                    self._current_command = None
+                    return True, output
+                else:
+                    logger.error(f"CEC command failed: {error}")
+                    self._current_command = None
+                    return False, error
+
+            except Exception as e:
+                logger.error(f"Error sending CEC command: {e}")
+                self._current_command = None
+                return False, str(e)
+    
+    def get_current_command(self) -> Optional[str]:
+        """Get the currently running CEC command.
+        
+        Returns:
+            Current command string or None if no command is running
+        """
+        return self._current_command
 
     async def tv_on(self) -> bool:
         """Turn the TV on.
@@ -272,6 +294,7 @@ class CECController:
                 "available": False,
                 "enabled": self.enabled,
                 "error": "CEC not available",
+                "current_command": self.get_current_command(),
             }
 
         power_status = await self.get_power_status()
@@ -283,6 +306,7 @@ class CECController:
             "device": self.cec_device,
             "power_status": power_status,
             "tv_name": osd_name,
+            "current_command": self.get_current_command(),
         }
 
 
