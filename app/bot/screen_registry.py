@@ -7,6 +7,7 @@ from app.bot.screens import (
     MovieSelectionScreen,
     PlayerScreen,
     ResolutionSelectionScreen,
+    RuTrackerAuthScreen,
     Screen,
     SearchScreen,
     SetupConfirmationScreen,
@@ -39,6 +40,7 @@ class ScreenRegistry:
         self.movie_selection_screen = MovieSelectionScreen(imdb_client)
         self.torrent_providers_screen = TorrentProvidersScreen()
         self.torrent_results_screen = TorrentResultsScreen(torrent_searcher, torrent_downloader)
+        self.rutracker_auth_screen = RuTrackerAuthScreen()
         self.library_screen = LibraryScreen(library_manager, mpv_controller)
         self.downloads_screen = DownloadsScreen(torrent_downloader)
         self.player_screen = PlayerScreen(mpv_controller)
@@ -55,6 +57,7 @@ class ScreenRegistry:
             self.movie_selection_screen,
             self.torrent_providers_screen,
             self.torrent_results_screen,
+            self.rutracker_auth_screen,
             self.library_screen,
             self.downloads_screen,
             self.player_screen,

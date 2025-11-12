@@ -99,3 +99,8 @@ TORRENT_SELECT = "torrent:select:"  # Followed by result index
 TORRENT_NEXT = "torrent:next:"
 TORRENT_PREV = "torrent:prev:"
 TORRENT_BACK = "torrent:back:"
+
+# RuTracker authorization screen callbacks
+RUTRACKER_AUTH_BACK = "rutracker_auth:back:"
+RUTRACKER_AUTH_QR = "rutracker_auth:qr:"
+RUTRACKER_AUTH_CHECK = "rutracker_auth:check:"
