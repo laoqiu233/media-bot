@@ -86,8 +86,11 @@ class MPVController:
                 self._is_playing = False
                 self._current_file = None
                 self._trigger_event("playback_finished", event)
-                # Show loading.gif when playback ends
-                asyncio.create_task(self._show_loading_gif())
+                # Show loading.gif when playback ends - wait a bit for video to fully stop
+                async def show_loading_after_delay():
+                    await asyncio.sleep(1.5)
+                    await self._show_loading_gif()
+                asyncio.create_task(show_loading_after_delay())
 
             @self._player.event_callback("file-loaded")
             def file_loaded_callback(event):
@@ -185,13 +188,15 @@ class MPVController:
                         pass
                 
                 # Only stop loading.gif AFTER video is confirmed loaded and visible
+                # Wait 1.5 seconds to ensure video is fully rendered and visible before stopping GIF
                 if video_loaded:
-                    logger.info("Video loaded and visible - stopping loading.gif")
+                    logger.info("Video loaded and visible - waiting 1.5s before stopping loading.gif")
+                    await asyncio.sleep(1.5)
                     await self._hide_loading_gif()
                 else:
                     # Fallback: if we can't detect, wait a bit more then stop anyway
-                    logger.warning("Could not confirm video load, stopping loading.gif anyway")
-                    await asyncio.sleep(0.5)
+                    logger.warning("Could not confirm video load, waiting 1.5s then stopping loading.gif anyway")
+                    await asyncio.sleep(1.5)
                     await self._hide_loading_gif()
 
                 # Verify playback actually started
@@ -269,7 +274,8 @@ class MPVController:
             self._is_playing = False
             self._current_file = None
             logger.info("Playback stopped")
-            # Show loading.gif when stopped
+            # Wait a bit for video to fully stop before showing loading.gif
+            await asyncio.sleep(1.5)
             await self._show_loading_gif()
             return True
         except Exception as e:

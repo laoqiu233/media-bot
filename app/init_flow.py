@@ -730,8 +730,13 @@ async def _display_with_mpv(image_path: Path) -> subprocess.Popen:
     ]
     # Start detached so we can kill later
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    # Wait a bit for mpv to start and display the image
-    await asyncio.sleep(0.8)
+    # Wait for mpv to start and display the image
+    # Check process is running and wait for display to be ready
+    for _ in range(15):  # Check up to 1.5 seconds to ensure image is visible
+        await asyncio.sleep(0.1)
+        if proc.poll() is not None:
+            # Process exited, something went wrong
+            break
     return proc
 
 
@@ -917,10 +922,11 @@ async def ensure_telegram_token(force: bool = False) -> None:
             # Try to show QR with mpv; fallback to printing URL if mpv missing
             try:
                 mpv_proc = await _display_with_mpv(qr_png)
-                # QR code screen is now loaded - wait a bit more to ensure it's visible
-                await asyncio.sleep(0.3)
+                # QR code screen is now loaded - _display_with_mpv already waited up to 1.5 seconds
+                # Give it just a tiny moment more to ensure it's fully rendered and visible
+                await asyncio.sleep(0.1)
                 
-                # NOW stop loading.gif after QR code screen is confirmed loaded
+                # NOW stop loading.gif after QR code screen is confirmed loaded and visible
                 if loading_proc is not None:
                     try:
                         loading_proc.terminate()
