@@ -242,8 +242,32 @@ async def _get_available_resolutions(output_name: str) -> list[DisplayMode]:
                             )
                             modes.append(DisplayMode(resolution, refresh_rate, is_current))
 
+        # Filter modes: for each resolution, keep only the highest refresh rate
+        # But always keep the current mode if it exists
+        resolution_groups: dict[str, list[DisplayMode]] = {}
+        for mode in modes:
+            if mode.resolution not in resolution_groups:
+                resolution_groups[mode.resolution] = []
+            resolution_groups[mode.resolution].append(mode)
+
+        filtered_modes: list[DisplayMode] = []
+        for resolution, mode_list in resolution_groups.items():
+            # Find current mode if it exists
+            current_mode = next((m for m in mode_list if m.current), None)
+            
+            if current_mode:
+                # Keep the current mode
+                filtered_modes.append(current_mode)
+            else:
+                # Keep the mode with the highest refresh rate
+                highest_rate_mode = max(
+                    mode_list,
+                    key=lambda m: float(m.refresh_rate) if m.refresh_rate else 0,
+                )
+                filtered_modes.append(highest_rate_mode)
+
         # Sort modes: current first, then by resolution (largest first), then by refresh rate
-        modes.sort(
+        filtered_modes.sort(
             key=lambda m: (
                 not m.current,
                 -int(m.resolution.split("x")[0]),
@@ -251,7 +275,11 @@ async def _get_available_resolutions(output_name: str) -> list[DisplayMode]:
             ),
             reverse=False,
         )
-        logger.info(f"Found {len(modes)} available resolution/refresh combinations for {output_name}")
+        logger.info(
+            f"Found {len(modes)} total modes, filtered to {len(filtered_modes)} "
+            f"resolution/refresh combinations for {output_name}"
+        )
+        modes = filtered_modes
 
     except Exception as e:
         logger.error(f"Error getting available resolutions: {e}", exc_info=True)
