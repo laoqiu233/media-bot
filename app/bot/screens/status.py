@@ -89,8 +89,6 @@ class StatusScreen(Screen):
                 status_text += f"Paused: {len(paused_downloads)}\n"
             if completed_downloads:
                 status_text += f"Completed: {len(completed_downloads)}\n"
-            if not tasks:
-                status_text += "No downloads\n"
             status_text += f"Films in library: {movies_count}\n"
 
             keyboard = [

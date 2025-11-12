@@ -178,13 +178,54 @@ class CECController:
         """Get the power status of the TV.
 
         Returns:
-            Power status string or None
+            Power status string ("on" or "standby") or None if unable to determine
         """
-        # cec-ctl doesn't have --get-power-status, use --give-device-power-status
-        # This sends a query, but we can't easily parse the response
-        # For now, return None as this feature isn't directly supported
-        logger.debug("Power status query not directly supported by cec-ctl")
-        return None
+        if not self.enabled:
+            return None
+
+        if not await self.check_availability():
+            return None
+
+        try:
+            # Use lock to prevent concurrent cec-ctl usage
+            async with self._lock:
+                self._current_command = "get_power_status"
+                # Build cec-ctl command with device specification
+                cmd = ["cec-ctl", "-d", self.cec_device, "--to", "0", "--give-device-power-status"]
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+
+                try:
+                    stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=2.0)
+                except TimeoutError:
+                    process.kill()
+                    await process.wait()
+                    self._current_command = None
+                    logger.debug("Power status query timeout")
+                    return None
+
+                # Combine stdout and stderr (cec-ctl may output to either)
+                output = (stdout.decode() if stdout else "") + (stderr.decode() if stderr else "")
+                self._current_command = None
+
+                # Check if output contains "pwr-state: on"
+                if "pwr-state: on" in output.lower():
+                    logger.debug("TV power status: on")
+                    return "on"
+                elif output.strip():  # If we got any response, assume standby
+                    logger.debug("TV power status: standby")
+                    return "standby"
+                else:
+                    logger.debug("No response from power status query")
+                    return None
+
+        except Exception as e:
+            logger.error(f"Error getting power status: {e}")
+            self._current_command = None
+            return None
 
     async def is_tv_on(self) -> bool:
         """Check if TV is currently on.
