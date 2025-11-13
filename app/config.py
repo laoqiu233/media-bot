@@ -106,6 +106,7 @@ def load_config() -> Config:
 
     mpv_vo = os.getenv("MPV_VO", "gpu")
     mpv_ao = os.getenv("MPV_AO", "alsa")
+    mpv_hwdec = os.getenv("MPV_HWDEC", "no")  # Default to "no" to avoid CUDA/VDPAU errors on Raspberry Pi
 
     cec_enabled = os.getenv("CEC_ENABLED", "true").lower() == "true"
     cec_device = os.getenv("CEC_DEVICE", "/dev/cec0")
@@ -126,7 +127,7 @@ def load_config() -> Config:
             "authorized_users": authorized_users,
         },
         "media_library": {},
-        "mpv": {"vo": mpv_vo, "ao": mpv_ao},
+        "mpv": {"vo": mpv_vo, "ao": mpv_ao, "hwdec": mpv_hwdec},
         "cec": {"enabled": cec_enabled, "device": cec_device},
         "logging": {"level": log_level},
     }

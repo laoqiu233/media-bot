@@ -125,37 +125,37 @@ class MPVController:
                     await asyncio.sleep(1.5)
                     await self._show_loading_gif()
                 
-                # Assume loop is always running - use the stored loop from initialize
+                # Schedule task on main event loop from MPV's callback thread
                 loop = self._event_loop
-                if loop is None:
-                    # Fallback: try to get current running loop
-                    try:
-                        loop = asyncio.get_running_loop()
-                        self._event_loop = loop
-                    except RuntimeError:
-                        logger.error("No event loop available for resuming downloads and showing loading gif")
-                        return
-                
-                # Create task in the running loop (fire and forget)
-                task = loop.create_task(resume_downloads_and_show_loading())
-                # Store task to prevent garbage collection and "never awaited" warning
-                self._background_tasks.add(task)
-                # Remove task when it completes
-                task.add_done_callback(self._background_tasks.discard)
+                if loop and loop.is_running():
+                    # Use run_coroutine_threadsafe to schedule from MPV's callback thread
+                    future = asyncio.run_coroutine_threadsafe(
+                        resume_downloads_and_show_loading(), loop
+                    )
+                    # Store future to prevent garbage collection
+                    # Note: We don't need to await it, it's fire-and-forget
+                else:
+                    logger.warning("Event loop not available for resuming downloads and showing loading gif")
 
             @self._player.event_callback("file-loaded")
             def file_loaded_callback(event):
                 self._is_playing = True
                 self._trigger_event("file_loaded", event)
-                # Hide loading.gif when file loads - actually terminate it now
-                asyncio.create_task(self._hide_loading_gif())
+                # Hide loading.gif when file loads - schedule on main event loop from MPV's thread
+                loop = self._event_loop
+                if loop and loop.is_running():
+                    # Use run_coroutine_threadsafe to schedule from MPV's callback thread
+                    asyncio.run_coroutine_threadsafe(self._hide_loading_gif(), loop)
             
             @self._player.event_callback("playback-restart")
             def playback_restart_callback(event):
                 """Called when playback actually starts/restarts."""
                 self._is_playing = True
-                # Also hide loading.gif when playback starts (fallback)
-                asyncio.create_task(self._hide_loading_gif())
+                # Also hide loading.gif when playback starts (fallback) - schedule on main event loop
+                loop = self._event_loop
+                if loop and loop.is_running():
+                    # Use run_coroutine_threadsafe to schedule from MPV's callback thread
+                    asyncio.run_coroutine_threadsafe(self._hide_loading_gif(), loop)
 
             logger.info("MPV player initialized successfully")
             
@@ -532,6 +532,72 @@ class MPVController:
             return True
         except Exception as e:
             logger.error(f"Error cycling audio: {e}")
+            return False
+
+    async def get_audio_tracks(self) -> list[dict[str, Any]]:
+        """Get list of available audio tracks.
+
+        Returns:
+            List of audio track dictionaries with id, title, lang, codec, etc.
+        """
+        if not self._player:
+            return []
+
+        try:
+            track_list = self._player.track_list
+            if not track_list:
+                return []
+
+            # Filter audio tracks
+            audio_tracks = []
+            for track in track_list:
+                if track.get("type") == "audio":
+                    audio_tracks.append({
+                        "id": track.get("id"),
+                        "title": track.get("title", ""),
+                        "lang": track.get("lang", ""),
+                        "codec": track.get("codec", ""),
+                        "selected": track.get("selected", False),
+                    })
+
+            return audio_tracks
+        except Exception as e:
+            logger.error(f"Error getting audio tracks: {e}")
+            return []
+
+    async def get_current_audio_track(self) -> int | None:
+        """Get current audio track ID.
+
+        Returns:
+            Current audio track ID or None
+        """
+        if not self._player:
+            return None
+
+        try:
+            aid = self._player.audio
+            return int(aid) if aid is not None else None
+        except Exception:
+            return None
+
+    async def set_audio_track(self, track_id: int) -> bool:
+        """Set audio track by ID.
+
+        Args:
+            track_id: Audio track ID
+
+        Returns:
+            True if successful
+        """
+        if not self._player:
+            return False
+
+        try:
+            self._player.audio = track_id
+            logger.info(f"Audio track set to {track_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting audio track: {e}")
             return False
 
     async def get_position(self) -> float | None:
