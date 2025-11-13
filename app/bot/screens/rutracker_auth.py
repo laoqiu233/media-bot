@@ -322,7 +322,6 @@ class RuTrackerAuthScreen(Screen):
 
     async def on_exit(self, context: Context) -> None:
         """Called when leaving the screen."""
-        # Stop QR code display and show loading3.gif
         try:
             project_root = _project_root()
             

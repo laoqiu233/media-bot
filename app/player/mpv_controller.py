@@ -115,37 +115,37 @@ class MPVController:
                 current_file = self._current_file
                 
                 # When switching files, loadfile() triggers end-file for the old file.
-                # In play(), we set _current_file to the new file BEFORE calling loadfile(),
-                # so if _current_file is still set when end-file fires, it means we're switching
-                # to a new file, not actually ending playback. In that case, don't clear the state.
-                # The file-loaded event will handle setting _is_playing = True for the new file.
+                # In play(), we set _is_playing = True and _current_file BEFORE calling loadfile(),
+                # so if _is_playing is True when end-file fires, it means we're switching files.
+                # Don't clear the state in that case - let the file-loaded event handle it.
                 event_reason = getattr(event, "reason", None)
                 
-                # Only clear playing state if this is a real end (eof/stop) AND no new file is loading
-                # If reason is "redirect", it's definitely a file switch, so don't clear
+                # Only clear playing state if _is_playing is False (real end, not switching files).
+                # When switching files, play() sets _is_playing = True BEFORE calling loadfile(),
+                # so if _is_playing is True when end-file fires, we're switching files.
+                # If reason is "redirect", it's definitely a file switch, so don't clear.
                 if event_reason == "redirect":
                     # File switch - don't clear state, let file-loaded event handle it
                     logger.debug("File switch detected (redirect), keeping playing state")
-                elif current_file is None or event_reason in ("eof", "stop"):
-                    # Real end of playback - clear state
+                elif not self._is_playing:
+                    # _is_playing is False, so this is a real end of playback
                     self._is_playing = False
                     self._current_file = None
                     logger.debug("Playback ended, cleared playing state")
                 else:
-                    # Unknown case - be conservative and don't clear if _current_file is set
-                    # (likely a file switch)
-                    logger.debug(f"End-file event with reason={event_reason}, current_file={current_file}, keeping state")
+                    # _is_playing is True, so we're switching files
+                    # Don't clear state - file-loaded event will confirm
+                    logger.debug(f"End-file during file switch (is_playing=True, reason={event_reason}), keeping state")
                 
                 self._trigger_event("playback_finished", event)
 
                 # Resume all downloads when playback ends (only if not switching files)
                 async def save_progress_resume_downloads_and_show_loading():
-                    # Check if we're switching files - if _current_file is still set, we're switching
+                    # Check if we're switching files - if _is_playing is True, we're switching
+                    # (because play() sets it to True before loadfile())
                     # Don't resume downloads or show loading.gif if switching
-                    is_switching = self._current_file is not None and self._current_file != current_file
-                    
-                    if is_switching:
-                        logger.debug("File switch detected, skipping download resume and loading.gif")
+                    if self._is_playing:
+                        logger.debug("File switch detected (is_playing=True), skipping download resume and loading.gif")
                         return
                     
                     # Save watch progress first
@@ -303,14 +303,17 @@ class MPVController:
                     except Exception as e:
                         logger.error(f"Error pausing downloads for playback: {e}")
 
+                # Set playing state and current file BEFORE loadfile() to prevent
+                # "end-file" event from clearing _is_playing when switching files
+                self._is_playing = True
+                self._current_file = file_path
+
                 # Load and play the file first (this will switch to video screen)
                 # The file-loaded event will handle stopping loading.gif
                 self._player.loadfile(str(file_path))
-                self._current_file = file_path
 
                 # Ensure playback starts (unpause if paused)
                 self._player.pause = False
-                self._is_playing = True
 
                 # Wait for video to actually load and be visible
                 # Check if video is playing by waiting for time-pos or duration
