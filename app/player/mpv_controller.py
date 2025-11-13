@@ -125,37 +125,37 @@ class MPVController:
                     await asyncio.sleep(1.5)
                     await self._show_loading_gif()
                 
-                # Assume loop is always running - use the stored loop from initialize
+                # Schedule task on main event loop from MPV's callback thread
                 loop = self._event_loop
-                if loop is None:
-                    # Fallback: try to get current running loop
-                    try:
-                        loop = asyncio.get_running_loop()
-                        self._event_loop = loop
-                    except RuntimeError:
-                        logger.error("No event loop available for resuming downloads and showing loading gif")
-                        return
-                
-                # Create task in the running loop (fire and forget)
-                task = loop.create_task(resume_downloads_and_show_loading())
-                # Store task to prevent garbage collection and "never awaited" warning
-                self._background_tasks.add(task)
-                # Remove task when it completes
-                task.add_done_callback(self._background_tasks.discard)
+                if loop and loop.is_running():
+                    # Use run_coroutine_threadsafe to schedule from MPV's callback thread
+                    future = asyncio.run_coroutine_threadsafe(
+                        resume_downloads_and_show_loading(), loop
+                    )
+                    # Store future to prevent garbage collection
+                    # Note: We don't need to await it, it's fire-and-forget
+                else:
+                    logger.warning("Event loop not available for resuming downloads and showing loading gif")
 
             @self._player.event_callback("file-loaded")
             def file_loaded_callback(event):
                 self._is_playing = True
                 self._trigger_event("file_loaded", event)
-                # Hide loading.gif when file loads - actually terminate it now
-                asyncio.create_task(self._hide_loading_gif())
+                # Hide loading.gif when file loads - schedule on main event loop from MPV's thread
+                loop = self._event_loop
+                if loop and loop.is_running():
+                    # Use run_coroutine_threadsafe to schedule from MPV's callback thread
+                    asyncio.run_coroutine_threadsafe(self._hide_loading_gif(), loop)
             
             @self._player.event_callback("playback-restart")
             def playback_restart_callback(event):
                 """Called when playback actually starts/restarts."""
                 self._is_playing = True
-                # Also hide loading.gif when playback starts (fallback)
-                asyncio.create_task(self._hide_loading_gif())
+                # Also hide loading.gif when playback starts (fallback) - schedule on main event loop
+                loop = self._event_loop
+                if loop and loop.is_running():
+                    # Use run_coroutine_threadsafe to schedule from MPV's callback thread
+                    asyncio.run_coroutine_threadsafe(self._hide_loading_gif(), loop)
 
             logger.info("MPV player initialized successfully")
             
