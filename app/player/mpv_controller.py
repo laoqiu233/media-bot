@@ -360,25 +360,32 @@ class MPVController:
                         logger.error(f"Error saving watch progress before switch: {e}")
 
                 # If we're showing an image (loading3.gif or download progress), stop it first
-                if self._showing_image:
-                    # Stop download progress update task if running
-                    if self._progress_update_task is not None:
-                        self._showing_download_progress = False
-                        self._progress_update_task.cancel()
+                # Stop download progress update task if running
+                if self._progress_update_task is not None:
+                    self._showing_download_progress = False
+                    self._progress_update_task.cancel()
+                    try:
+                        await self._progress_update_task
+                    except asyncio.CancelledError:
+                        pass
+                    self._progress_update_task = None
+                
+                # Stop any subprocess MPV showing images (loading3.gif or progress)
+                if self._loading_proc is not None and self._loading_proc.poll() is None:
+                    try:
+                        self._loading_proc.terminate()
                         try:
-                            await self._progress_update_task
-                        except asyncio.CancelledError:
-                            pass
-                        self._progress_update_task = None
-                    
-                    # Reset image-specific settings for video
-                    self._player.loop_file = "no"
-                    self._player.keepaspect = True  # Restore aspect ratio for video
-                    self._player.panscan = 0.0
-                    self._showing_image = False
-                    self._current_image_path = None
-                    
-                    # The video file will be loaded next, which will replace the image
+                            await asyncio.wait_for(asyncio.to_thread(self._loading_proc.wait), timeout=0.5)
+                        except asyncio.TimeoutError:
+                            self._loading_proc.kill()
+                            await asyncio.to_thread(self._loading_proc.wait)
+                    except Exception as e:
+                        logger.debug(f"Error stopping image display process: {e}")
+                    self._loading_proc = None
+                
+                # Clear image state
+                self._showing_image = False
+                self._current_image_path = None
 
                 # Set playing state and current file BEFORE loadfile() to prevent
                 # "end-file" event from clearing _is_playing when switching files
@@ -1150,8 +1157,14 @@ class MPVController:
             draw.text((padding + 2, item_y + 2), item_name, fill=(0, 0, 0), font=font_item)
             draw.text((padding, item_y), item_name, fill=(255, 255, 255), font=font_item)
             
-            # Progress bar
-            progress = max(0.0, min(100.0, task.progress))
+            # Progress bar - calculate from total_done and total_wanted if progress is 0
+            if task.progress > 0:
+                progress = max(0.0, min(100.0, task.progress))
+            elif task.total_wanted > 0:
+                # Calculate progress from bytes downloaded
+                progress = max(0.0, min(100.0, (task.total_done / task.total_wanted) * 100.0))
+            else:
+                progress = 0.0
             bar_x = padding
             bar_y = item_y + int(50 * scale_factor)
             bar_width = width - 2 * padding
@@ -1183,11 +1196,18 @@ class MPVController:
                 downloaded_gb = task.total_done / 1024 / 1024 / 1024
                 total_gb = task.total_wanted / 1024 / 1024 / 1024
                 progress_text += f" ({downloaded_gb:.2f} / {total_gb:.2f} GB)"
+            elif task.total_done > 0:
+                # Show downloaded size even if total is unknown
+                downloaded_gb = task.total_done / 1024 / 1024 / 1024
+                progress_text += f" ({downloaded_gb:.2f} GB)"
             
             # Add download speed
             if task.download_rate > 0:
                 speed_mb = task.download_rate / 1024 / 1024
                 progress_text += f" | {speed_mb:.2f} MB/s"
+            elif task.status.value == "downloading":
+                # Show 0 MB/s if downloading but no rate yet
+                progress_text += " | 0.00 MB/s"
             
             progress_bbox = draw.textbbox((0, 0), progress_text, font=font_progress)
             progress_text_width = progress_bbox[2] - progress_bbox[0]
@@ -1227,18 +1247,57 @@ class MPVController:
                         self._progress_update_task.cancel()
                         self._progress_update_task = None
                     
-                    # Stop progress display and show loading3.gif smoothly using same MPV instance
+                    # Stop progress display and show loading3.gif smoothly using subprocess
                     project_root = Path(__file__).resolve().parents[2]
                     loading_path = project_root / "loading3.gif"
-                    if loading_path.exists() and self._player is not None:
-                        try:
-                            # Use same MPV instance - just load the new file
-                            self._player.loadfile(str(loading_path))
-                            self._showing_image = True
-                            self._current_image_path = loading_path
-                            await asyncio.sleep(0.2)  # Brief wait for image to load
-                        except Exception as e:
-                            logger.error(f"Error loading loading3.gif: {e}", exc_info=True)
+                    if loading_path.exists():
+                        old_proc = self._loading_proc
+                        
+                        # Start loading3.gif first
+                        cmd = [
+                            "mpv",
+                            "--no-terminal",
+                            "--force-window=yes",
+                            "--image-display-duration=inf",
+                            "--loop-file=inf",
+                            "--fs",
+                            "--no-border",
+                            "--no-window-dragging",
+                            "--no-input-default-bindings",
+                            "--no-input-vo-keyboard",
+                            "--keepaspect=no",
+                            "--video-unscaled=no",
+                            "--panscan=1.0",
+                            "--video-margin-ratio-left=0",
+                            "--video-margin-ratio-right=0",
+                            "--video-margin-ratio-top=0",
+                            "--video-margin-ratio-bottom=0",
+                            "--fullscreen",
+                            str(loading_path),
+                        ]
+                        
+                        new_proc = subprocess.Popen(
+                            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                        )
+                        self._loading_proc = new_proc
+                        
+                        # Wait for loading3.gif to be visible
+                        for _ in range(15):
+                            await asyncio.sleep(0.1)
+                            if new_proc.poll() is not None:
+                                break
+                        
+                        # Now close old progress display
+                        if old_proc is not None and old_proc.poll() is None:
+                            try:
+                                old_proc.terminate()
+                                try:
+                                    await asyncio.wait_for(asyncio.to_thread(old_proc.wait), timeout=0.5)
+                                except asyncio.TimeoutError:
+                                    old_proc.kill()
+                                    await asyncio.to_thread(old_proc.wait)
+                            except Exception:
+                                pass
                     break
                 
                 # Regenerate progress image
@@ -1256,17 +1315,54 @@ class MPVController:
                     progress_png.unlink()
                 shutil.move(progress_png_temp, progress_png)
                 
-                # Reload image in the same MPV player instance (fast, no process restart)
-                if self._player is not None and self._showing_image:
+                # Reload image smoothly - start new process before closing old one
+                old_proc = self._loading_proc
+                
+                # Start new MPV process with updated image
+                cmd = [
+                    "mpv",
+                    "--no-terminal",
+                    "--force-window=yes",
+                    "--image-display-duration=inf",
+                    "--loop-file=inf",
+                    "--fs",
+                    "--no-border",
+                    "--no-window-dragging",
+                    "--no-input-default-bindings",
+                    "--no-input-vo-keyboard",
+                    "--keepaspect=no",
+                    "--video-unscaled=no",
+                    "--panscan=1.0",
+                    "--video-margin-ratio-left=0",
+                    "--video-margin-ratio-right=0",
+                    "--video-margin-ratio-top=0",
+                    "--video-margin-ratio-bottom=0",
+                    "--fullscreen",
+                    str(progress_png),
+                ]
+                
+                new_proc = subprocess.Popen(
+                    cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+                self._loading_proc = new_proc
+                
+                # Wait for new image to be visible
+                for _ in range(15):
+                    await asyncio.sleep(0.1)
+                    if new_proc.poll() is not None:
+                        break
+                
+                # Now close old process (new one is already visible)
+                if old_proc is not None and old_proc.poll() is None:
                     try:
-                        # Force reload by calling loadfile again - MPV will reload the updated file
-                        # This works because we atomically replaced the file, so MPV sees it as changed
-                        self._player.loadfile(str(progress_png))
-                        self._current_image_path = progress_png
-                        # Small delay to ensure MPV has reloaded the file
-                        await asyncio.sleep(0.15)
-                    except Exception as e:
-                        logger.error(f"Error reloading progress image: {e}", exc_info=True)
+                        old_proc.terminate()
+                        try:
+                            await asyncio.wait_for(asyncio.to_thread(old_proc.wait), timeout=0.5)
+                        except asyncio.TimeoutError:
+                            old_proc.kill()
+                            await asyncio.to_thread(old_proc.wait)
+                    except Exception:
+                        pass
                 
             except asyncio.CancelledError:
                 break
@@ -1311,55 +1407,74 @@ class MPVController:
             
             self._generate_download_progress_image(active_tasks, progress_png)
             
-            # Use the same MPV player instance to display image (no new process)
-            if self._player is None:
-                logger.error("MPV player not initialized, cannot show download progress")
-                return False
-            
+            # Use subprocess MPV (like init_flow) for better reliability
             logger.info(f"Showing download progress for {len(active_tasks)} task(s) on TV")
             
             try:
-                # Stop any legacy subprocess if running
-                if self._loading_proc is not None and self._loading_proc.poll() is None:
-                    logger.debug("Stopping legacy loading process")
-                    try:
-                        self._loading_proc.terminate()
-                        await asyncio.wait_for(asyncio.to_thread(self._loading_proc.wait), timeout=0.5)
-                    except (asyncio.TimeoutError, Exception):
-                        try:
-                            self._loading_proc.kill()
-                            await asyncio.to_thread(self._loading_proc.wait)
-                        except Exception:
-                            pass
-                    self._loading_proc = None
-                
                 # Verify image file exists
                 if not progress_png.exists():
                     logger.error(f"Progress image file not found: {progress_png}")
                     return False
                 
-                logger.debug(f"Configuring MPV for image display: {progress_png}")
+                # Save old process reference for smooth transition
+                old_proc = self._loading_proc
                 
-                # Configure MPV for image display
-                self._player.loop_file = "inf"
-                self._player.keepaspect = False
-                self._player.panscan = 1.0
-                self._player.fullscreen = True
+                # Start new MPV process (like init_flow) - start before closing old one
+                cmd = [
+                    "mpv",
+                    "--no-terminal",
+                    "--force-window=yes",
+                    "--image-display-duration=inf",
+                    "--loop-file=inf",
+                    "--fs",
+                    "--no-border",
+                    "--no-window-dragging",
+                    "--no-input-default-bindings",
+                    "--no-input-vo-keyboard",
+                    "--keepaspect=no",
+                    "--video-unscaled=no",
+                    "--panscan=1.0",
+                    "--video-margin-ratio-left=0",
+                    "--video-margin-ratio-right=0",
+                    "--video-margin-ratio-top=0",
+                    "--video-margin-ratio-bottom=0",
+                    "--fullscreen",
+                    str(progress_png),
+                ]
                 
-                # Load the image file
-                logger.debug(f"Loading image file in MPV: {progress_png}")
-                self._player.loadfile(str(progress_png))
+                logger.debug(f"Starting new MPV process for progress image: {progress_png}")
+                new_proc = subprocess.Popen(
+                    cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+                self._loading_proc = new_proc
                 
-                # Mark that we're showing an image
-                self._showing_image = True
-                self._current_image_path = progress_png
+                # Wait for new image to be visible (smooth transition)
+                for _ in range(15):
+                    await asyncio.sleep(0.1)
+                    if new_proc.poll() is not None:
+                        logger.warning("New MPV process exited immediately")
+                        break
                 
-                # Wait briefly for image to load
-                await asyncio.sleep(0.3)
-                logger.info("Download progress image loaded in MPV")
+                # Now close old process (new one is already visible)
+                if old_proc is not None and old_proc.poll() is None:
+                    try:
+                        old_proc.terminate()
+                        try:
+                            await asyncio.wait_for(asyncio.to_thread(old_proc.wait), timeout=0.5)
+                        except asyncio.TimeoutError:
+                            old_proc.kill()
+                            await asyncio.to_thread(old_proc.wait)
+                    except Exception as e:
+                        logger.debug(f"Error closing old process: {e}")
+                
+                # Clear image state (we're using subprocess now, not MPV player instance)
+                self._showing_image = False
+                self._current_image_path = None
+                
+                logger.info("Download progress image displayed on TV")
                 
             except Exception as e:
-                logger.error(f"Error loading progress image in MPV: {e}", exc_info=True)
+                logger.error(f"Error showing progress image: {e}", exc_info=True)
                 return False
             
             # Start background task to update progress periodically
@@ -1453,44 +1568,64 @@ class MPVController:
                 logger.debug("loading3.gif not found, skipping display")
                 return
 
-            # Use the same MPV player instance to display loading3.gif (no new process)
-            if self._player is None:
-                logger.warning("MPV player not initialized, cannot show loading3.gif")
-                return
-
+            # Use subprocess MPV (like init_flow) for better reliability
             try:
-                # Stop any legacy subprocess if running
-                if self._loading_proc is not None and self._loading_proc.poll() is None:
+                # Save old process reference for smooth transition
+                old_proc = self._loading_proc
+                
+                # Start new MPV process (like init_flow) - start before closing old one
+                cmd = [
+                    "mpv",
+                    "--no-terminal",
+                    "--force-window=yes",
+                    "--image-display-duration=inf",
+                    "--loop-file=inf",
+                    "--fs",
+                    "--no-border",
+                    "--no-window-dragging",
+                    "--no-input-default-bindings",
+                    "--no-input-vo-keyboard",
+                    "--keepaspect=no",
+                    "--video-unscaled=no",
+                    "--panscan=1.0",
+                    "--video-margin-ratio-left=0",
+                    "--video-margin-ratio-right=0",
+                    "--video-margin-ratio-top=0",
+                    "--video-margin-ratio-bottom=0",
+                    "--fullscreen",
+                    str(loading_path),
+                ]
+                
+                new_proc = subprocess.Popen(
+                    cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+                self._loading_proc = new_proc
+                
+                # Wait for new image to be visible (smooth transition)
+                for _ in range(15):
+                    await asyncio.sleep(0.1)
+                    if new_proc.poll() is not None:
+                        break
+                
+                # Now close old process (new one is already visible)
+                if old_proc is not None and old_proc.poll() is None:
                     try:
-                        self._loading_proc.terminate()
-                        await asyncio.wait_for(asyncio.to_thread(self._loading_proc.wait), timeout=0.5)
-                    except (asyncio.TimeoutError, Exception):
+                        old_proc.terminate()
                         try:
-                            self._loading_proc.kill()
-                            await asyncio.to_thread(self._loading_proc.wait)
-                        except Exception:
-                            pass
-                    self._loading_proc = None
+                            await asyncio.wait_for(asyncio.to_thread(old_proc.wait), timeout=0.5)
+                        except asyncio.TimeoutError:
+                            old_proc.kill()
+                            await asyncio.to_thread(old_proc.wait)
+                    except Exception as e:
+                        logger.debug(f"Error closing old process: {e}")
                 
-                # Configure MPV for image display
-                self._player.loop_file = "inf"
-                self._player.keepaspect = False
-                self._player.panscan = 1.0
-                self._player.fullscreen = True
+                # Clear image state (we're using subprocess now)
+                self._showing_image = False
+                self._current_image_path = None
                 
-                # Load the loading3.gif file
-                self._player.loadfile(str(loading_path))
-                
-                # Mark that we're showing an image
-                self._showing_image = True
-                self._current_image_path = loading_path
-                
-                # Wait briefly for image to load
-                await asyncio.sleep(0.3)
-                
-                logger.info("Displaying loading3.gif on TV using MPV player instance")
+                logger.info("Displaying loading3.gif on TV using subprocess MPV")
             except Exception as e:
-                logger.error(f"Error loading loading3.gif in MPV: {e}", exc_info=True)
+                logger.error(f"Error loading loading3.gif: {e}", exc_info=True)
         except Exception as e:
             logger.debug(f"Could not display loading3.gif: {e}")
 
