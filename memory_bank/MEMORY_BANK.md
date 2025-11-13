@@ -64,9 +64,11 @@
 - **Python 3.11+**: Main programming language with modern type hints
 - **python-telegram-bot 21.x**: Async Telegram bot framework with job queue
 - **Pydantic 2.12.4+**: Data validation, settings, and models
-- **aiohttp 3.9+**: Async HTTP client for web scraping
+- **aiohttp 3.9+**: Async HTTP client for web scraping and web server
 - **asyncio**: Native async/await for concurrent operations
 - **python-dotenv**: Environment variable management
+- **qrcode[pil] 7.4+**: QR code generation for WiFi setup
+- **Pillow**: Image processing for QR code customization
 
 ### Media & Torrent
 
@@ -74,6 +76,7 @@
 - **libtorrent 2.0+**: BitTorrent protocol implementation
 - **beautifulsoup4 4.12+**: HTML parsing for torrent search
 - **lxml 5.0+**: Fast XML/HTML parsing
+- **py-rutracker-client 0.1+**: RuTracker torrent tracker API client
 - **cec-client**: HDMI-CEC control (system command, not Python package)
 
 ### Storage & Development
@@ -81,6 +84,11 @@
 - **aiofiles 23.0+**: Async file I/O operations
 - **ruff 0.8+**: Fast Python linter and formatter (dev)
 - **Poetry**: Dependency management and packaging
+
+### System & Network
+
+- **NetworkManager (nmcli)**: WiFi management and hotspot creation
+- **mpv (binary)**: Media player for QR code display and video playback
 
 ---
 
@@ -92,6 +100,7 @@ media-bot/
 │   ├── __init__.py
 │   ├── __main__.py              # Entry point (python -m app)
 │   ├── config.py                # Configuration management
+│   ├── init_flow.py             # WiFi/token setup flow with QR codes
 │   │
 │   ├── bot/                     # Telegram bot implementation
 │   │   ├── __init__.py
@@ -102,26 +111,48 @@ media-bot/
 │   │   ├── session.py           # Individual session with auto-refresh
 │   │   ├── screen_registry.py   # Screen registry and dependency injection
 │   │   ├── callback_data.py     # Callback query constants
-│   │   └── screens/             # Screen-based UI system
+│   │   └── screens/             # Screen-based UI system (19 screens)
 │   │       ├── __init__.py
 │   │       ├── base.py          # Base screen class and context
 │   │       ├── main_menu.py     # Main menu screen
-│   │       ├── search.py        # Torrent search screen
+│   │       ├── search.py        # IMDb search screen
+│   │       ├── movie_selection.py # IMDb movie selection
+│   │       ├── torrent.py       # Torrent provider & results
 │   │       ├── library.py       # Library browser screen
 │   │       ├── downloads.py     # Download manager screen
 │   │       ├── player.py        # Player control screen
+│   │       ├── audio_output_selection.py # Audio output config
+│   │       ├── audio_track_selection.py  # Audio track selection
+│   │       ├── subtitle_selection.py     # Subtitle selection
+│   │       ├── resolution_selection.py   # Video resolution
+│   │       ├── hdmi_port_selection.py    # HDMI port selection
 │   │       ├── status.py        # System status screen
-│   │       └── tv.py            # TV control screen
+│   │       ├── system_control.py # System control (reboot, shutdown)
+│   │       ├── tv.py            # TV control screen
+│   │       ├── setup_confirmation.py # Setup confirmation
+│   │       └── rutracker_auth.py # RuTracker auth screen
+│   │
+│   ├── templates/               # HTML templates for setup
+│   │   ├── setup_ap.html        # Access point setup page
+│   │   ├── setup.html           # Main setup form
+│   │   ├── setup_success.html   # Setup success page
+│   │   ├── rutracker_setup.html # RuTracker credentials form
+│   │   └── rutracker_success.html # RuTracker success page
 │   │
 │   ├── library/                 # Media library management
 │   │   ├── __init__.py
 │   │   ├── manager.py           # Library manager with filesystem storage
-│   │   └── models.py            # Pydantic models for media
+│   │   ├── models.py            # Pydantic models for media
+│   │   └── imdb_client.py       # IMDb API client
 │   │
 │   ├── torrent/                 # Torrent system
 │   │   ├── __init__.py
-│   │   ├── searcher.py          # Multi-source torrent searcher
-│   │   └── downloader.py        # libtorrent download manager
+│   │   ├── searcher.py          # Multi-source torrent searcher (YTS, RuTracker)
+│   │   ├── downloader.py        # libtorrent download manager
+│   │   ├── validator.py         # Torrent validation
+│   │   ├── metadata_fetcher.py  # Torrent metadata extraction
+│   │   ├── importer.py          # Import to library
+│   │   └── file_utils.py        # File utilities
 │   │
 │   ├── player/                  # Media player
 │   │   ├── __init__.py
@@ -129,17 +160,22 @@ media-bot/
 │   │
 │   ├── scheduler/               # Series tracking
 │   │   ├── __init__.py
-│   │   └── series_scheduler.py  # Watch progress and recommendations
+│   │   ├── series_scheduler.py  # Watch progress and recommendations
+│   │   ├── series_updater.py    # Series update checker
+│   │   └── watch_progress.py    # Watch progress tracking
 │   │
 │   └── tv/                      # TV control
 │       ├── __init__.py
 │       └── hdmi_cec.py          # HDMI-CEC controller
 │
+├── loading.gif                  # Initial loading animation
+├── loading3.gif                 # Secondary loading animation
 ├── pyproject.toml               # Poetry project configuration
 ├── poetry.lock                  # Locked dependencies
 ├── Makefile                     # Development commands
-├── README.md                    # Basic usage instructions
-└── MEMORY_BANK.md               # This file (architecture documentation)
+├── README.md                    # User guide (Russian)
+└── memory_bank/                 # Technical documentation
+    └── MEMORY_BANK.md           # This file (architecture documentation)
 ```
 
 ---
@@ -263,6 +299,104 @@ AUTHORIZED_USERS=username1,username2,username3
 - Natural fit with python-telegram-bot async API
 - Efficient handling of multiple concurrent operations
 
+### 7. WiFi Setup Flow with QR Codes
+
+**Decision**: Interactive setup flow before bot initialization  
+**Rationale**:
+- Zero-config first boot experience
+- QR code WiFi join + web form for credentials
+- NetworkManager hotspot for setup access
+- Visual feedback via MPV-displayed QR codes
+- Responsive design adapts to TV resolution
+
+**Implementation**:
+- `init_flow.py` runs before bot starts if token missing
+- Creates temporary WiFi hotspot
+- Generates composite QR (WiFi credentials + setup URL)
+- Displays QR fullscreen via MPV
+- Web server (aiohttp) serves setup form
+- Writes credentials to .env on submission
+- Seamless transition to bot startup
+
+**Setup Flow Sequence**:
+1. Boot → Check for TELEGRAM_BOT_TOKEN
+2. If missing → Start loading.gif animation
+3. Create WiFi hotspot (NetworkManager/nmcli)
+4. Generate QR code image:
+   - WiFi credentials (SSID/password)
+   - Setup web form URL
+   - Responsive layout based on screen resolution
+   - Beautiful gradient background matching web form
+5. Display QR via MPV fullscreen
+6. Start aiohttp web server on port 8765
+7. User scans QR → Joins WiFi → Opens setup URL
+8. Web form collects:
+   - WiFi network to connect to
+   - WiFi password
+   - Telegram bot token
+9. On submit → Connect to WiFi → Save to .env
+10. Show loading3.gif → Close QR screen → Start bot
+
+**RuTracker Setup** (optional, on-demand):
+- Separate flow via rutracker_auth screen
+- Collects tracker credentials and proxy
+- Saved to .env for persistent authentication
+- Can be configured anytime from bot menu
+
+---
+
+## Application Startup Flow
+
+### Initialization Sequence
+
+**1. Entry Point** (`app/__main__.py`):
+```python
+if __name__ == "__main__":
+    # Ensure bot token available; will run QR+form init if missing
+    asyncio.run(ensure_telegram_token())
+    run_integrated_bot()
+```
+
+**2. WiFi/Token Setup** (`init_flow.py`):
+- Checks for TELEGRAM_BOT_TOKEN environment variable
+- If missing: Launches interactive setup flow
+- If present: Skips directly to bot initialization
+
+**3. Bot Initialization** (`integrated_bot.py`):
+```python
+1. Load configuration from .env
+2. Initialize all system components:
+   - Library Manager
+   - IMDb Client
+   - Torrent Searcher
+   - Torrent Downloader
+   - MPV Player
+   - HDMI-CEC Controller
+   - Series Scheduler
+3. Load and resume persisted downloads
+4. Set download completion callback
+5. Create Screen Registry with dependencies
+6. Initialize Session Manager
+7. Set up authorization system
+8. Register bot handlers (/start command)
+9. Start polling Telegram API
+```
+
+**4. Runtime Operation**:
+- Session manager handles user interactions
+- Screen-based UI updates via auto-refresh
+- Background tasks:
+  - Download monitoring (every 2s)
+  - Session refresh (every 0.5s per active user)
+  - Series update checker (periodic)
+
+**5. Shutdown**:
+- Save download resume data (fastresume)
+- Stop monitoring tasks
+- Close player
+- Cleanup sessions
+- Close database connections
+
 ---
 
 ## Configuration Management
@@ -299,10 +433,22 @@ DOWNLOAD_PATH=/home/pi/downloads
 # MPV Configuration
 MPV_VO=gpu
 MPV_AO=alsa
+MPV_HWDEC=no  # Hardware decoding (no/auto/vdpau)
 
 # CEC Configuration
 CEC_ENABLED=true
 CEC_DEVICE=/dev/cec0
+
+# RuTracker Configuration (optional)
+TRACKER_USERNAME=your_rutracker_username
+TRACKER_PASSWORD=your_rutracker_password
+TRACKER_PROXY=http://proxy:port  # Optional proxy for restricted regions
+
+# WiFi Setup (auto-generated on first boot)
+SETUP_AP_SSID=media-bot-setup
+SETUP_AP_PASSWORD=mediabot1234
+WIFI_SSID=your_network_name
+WIFI_PASSWORD=your_network_password
 
 # Logging
 LOG_LEVEL=INFO
@@ -345,6 +491,42 @@ movie = await library.import_from_download(download_path, torrent_name)
 - Quality detection from filenames
 - In-memory caching for fast access
 - Automatic file moving to library on import
+- IMDb metadata preservation from downloads
+
+### IMDb Client (library/imdb_client.py)
+
+**API integration for movie metadata**
+
+```python
+imdb_client = IMDbClient()
+
+# Search for movies/series
+results = await imdb_client.search_titles("inception", limit=10)
+# Returns List[IMDbTitle] with basic info
+
+# Get full details
+details = await imdb_client.get_title("tt1375666")
+# Returns IMDbTitle with complete metadata
+```
+
+**Features**:
+- Search via IMDb API (`/search/titles`)
+- Full details fetch (`/titles/{id}`)
+- Rich metadata:
+  - Title, year, rating, vote count
+  - Genres, plot description
+  - Director and cast information
+  - Poster images (HTTP URLs)
+  - Runtime and release info
+- Async HTTP client (aiohttp)
+- Error handling and rate limiting
+- Used in search flow for content discovery
+
+**Data Models**:
+- `IMDbTitle`: Search results with basic info
+- `IMDbMovie`: Full movie details with plot, directors, stars
+- `IMDbImage`: Poster image with URL and dimensions
+- `IMDbRating`: Rating value and vote count
 
 ### Torrent System
 
@@ -352,16 +534,20 @@ movie = await library.import_from_download(download_path, torrent_name)
 ```python
 searcher = TorrentSearcher()
 
-# Search across sources (currently YTS API)
+# Search across sources (YTS and RuTracker)
 results = await searcher.search("movie name", limit=20)
 # Returns List[TorrentSearchResult] sorted by seeders
 ```
 
 **Features**:
-- YTS API integration (fast and reliable)
+- **YTS API integration**: Fast and reliable movie torrents
+- **RuTracker integration**: Russian tracker with vast library
+  - Authentication via py-rutracker-client
+  - Proxy support for restricted regions
+  - Setup screen for credentials
 - Quality detection (720p, 1080p, 4K)
 - Automatic magnet link generation
-- Extensible for additional sources (ThePirateBay template included)
+- Extensible for additional sources
 
 **Downloader** (torrent/downloader.py):
 ```python
@@ -665,55 +851,135 @@ async def handler(update, context):
 
 ## Bot UI Screens
 
-### Available Screens
+### Available Screens (19 total)
 
+#### Core Navigation
 1. **Main Menu** (`main_menu.py`)
    - Central navigation hub
    - Access to all features
    - Clean button layout
 
+#### Search & Discovery
 2. **Search** (`search.py`)
-   - Torrent search interface
-   - Displays results with quality/seeders
+   - IMDb movie search interface
+   - Query input and results
+   
+3. **Movie Selection** (`movie_selection.py`)
+   - Browse IMDb search results
+   - View movie details with posters
+   - Navigate to torrent providers
+
+4. **Torrent** (`torrent.py`)
+   - Unified torrent provider selection and results
+   - YTS and RuTracker integration
    - Download initiation
 
-3. **Library** (`library.py`)
+#### Library Management
+5. **Library** (`library.py`)
    - Browse movies and series
+   - Filter and search local content
+   - Navigate through series/seasons/episodes
    - Play media items
+   - Delete content
    - Rescan library
 
-4. **Downloads** (`downloads.py`)
+#### Download Management
+6. **Downloads** (`downloads.py`)
    - Active download monitoring
    - Progress bars and speeds
    - Pause/resume/cancel controls
+   - Download persistence across restarts
 
-5. **Player** (`player.py`)
-   - Playback controls
+#### Media Playback
+7. **Player** (`player.py`)
+   - Playback controls (play/pause/stop)
    - Seek forward/backward
    - Volume control
-   - Stop playback
+   - Audio/subtitle track selection
 
-6. **Status** (`status.py`)
-   - System status overview
-   - CEC availability
-   - Player status
-   - Download statistics
+8. **Audio Output Selection** (`audio_output_selection.py`)
+   - Select audio output device
+   - ALSA/HDMI output configuration
 
-7. **TV Control** (`tv.py`)
-   - TV power on/off
-   - Volume controls
-   - Input source switching
+9. **Audio Track Selection** (`audio_track_selection.py`)
+   - Select audio track/language
+   - Multi-language support
+
+10. **Subtitle Selection** (`subtitle_selection.py`)
+    - Enable/disable subtitles
+    - Select subtitle track/language
+
+11. **Resolution Selection** (`resolution_selection.py`)
+    - Video resolution configuration
+    - Quality presets
+
+12. **HDMI Port Selection** (`hdmi_port_selection.py`)
+    - Select active HDMI port
+    - Multi-monitor support
+
+#### System Management
+13. **Status** (`status.py`)
+    - System status overview
+    - CEC availability
+    - Player status
+    - Download statistics
+
+14. **TV Control** (`tv.py`)
+    - TV power on/off via HDMI-CEC
+    - Volume controls
+    - Input source switching
+
+15. **System Control** (`system_control.py`)
+    - System reboot/shutdown
+    - Service management
+    - System information
+
+#### Setup & Configuration
+16. **Setup Confirmation** (`setup_confirmation.py`)
+    - Confirm setup completion
+    - Review configuration
+
+17. **RuTracker Auth** (`rutracker_auth.py`)
+    - RuTracker credentials input
+    - Proxy configuration
+    - Authentication verification
 
 ### Screen Navigation Flow
 
 ```
 Main Menu
-├── Search → (results) → Download → Main Menu
-├── Library → (movies/series) → Play → Player → Main Menu
-├── Downloads → (task list) → Control → Downloads
-├── Player → (controls) → Player
-├── Status → (info) → Main Menu
-└── TV → (controls) → TV
+├── Search (IMDb)
+│   └── Movie Selection
+│       └── Torrent (Provider + Results)
+│           └── Downloads
+│
+├── Library
+│   ├── Movies → Movie Details → Play
+│   └── Series → Seasons → Episodes → Video Selection → Play
+│       
+├── Downloads
+│   └── (Task Management with pause/resume/cancel)
+│
+├── Player
+│   ├── Playback Controls
+│   ├── Audio Output Selection
+│   ├── Audio Track Selection
+│   ├── Subtitle Selection
+│   ├── Resolution Selection
+│   └── HDMI Port Selection
+│
+├── Status
+│   └── System Information
+│
+├── TV Control
+│   └── HDMI-CEC Commands
+│
+├── System Control
+│   └── Reboot/Shutdown
+│
+└── Settings
+    ├── Setup Confirmation
+    └── RuTracker Auth
 ```
 
 ---

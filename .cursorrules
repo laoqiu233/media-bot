@@ -188,6 +188,7 @@ app/
 ├── __init__.py
 ├── __main__.py              # Entry point
 ├── config.py                # Configuration with Pydantic
+├── init_flow.py             # WiFi setup with QR codes
 ├── bot/                     # Telegram bot
 │   ├── integrated_bot.py    # Main orchestrator
 │   ├── handlers.py          # Command handlers
@@ -196,14 +197,25 @@ app/
 │   ├── session_manager.py   # Session management
 │   ├── session.py           # Individual sessions
 │   ├── screen_registry.py   # Screen DI container
-│   └── screens/             # UI screens
+│   └── screens/             # UI screens (19 total)
 │       ├── base.py          # Base Screen class
-│       ├── main_menu.py
-│       ├── search.py
-│       ├── library.py
-│       ├── downloads.py
-│       ├── player.py
-│       └── ...
+│       ├── main_menu.py     # Main menu
+│       ├── search.py        # IMDb search
+│       ├── movie_selection.py  # IMDb results
+│       ├── torrent.py       # Torrent provider + results
+│       ├── library.py       # Library browser
+│       ├── downloads.py     # Download manager
+│       ├── player.py        # Player controls
+│       ├── audio_output_selection.py  # Audio output
+│       ├── audio_track_selection.py   # Audio track
+│       ├── subtitle_selection.py      # Subtitles
+│       ├── resolution_selection.py    # Resolution
+│       ├── hdmi_port_selection.py     # HDMI port
+│       ├── status.py        # System status
+│       ├── tv.py            # TV control
+│       ├── system_control.py  # System management
+│       ├── setup_confirmation.py  # Setup confirm
+│       └── rutracker_auth.py  # RuTracker auth
 ├── library/                 # Media library
 │   ├── manager.py           # Library manager
 │   ├── models.py            # Pydantic models
@@ -214,9 +226,17 @@ app/
 ├── player/                  # Media player
 │   └── mpv_controller.py
 ├── scheduler/               # Series tracking
-│   └── series_scheduler.py
-└── tv/                      # TV control
-    └── hdmi_cec.py
+│   ├── series_scheduler.py
+│   ├── series_updater.py
+│   └── watch_progress.py
+├── tv/                      # TV control
+│   └── hdmi_cec.py
+└── templates/               # HTML templates for setup
+    ├── setup_ap.html        # Access point page
+    ├── setup.html           # Main setup form
+    ├── setup_success.html   # Success page
+    ├── rutracker_setup.html # RuTracker credentials
+    └── rutracker_success.html
 ```
 
 ### Screen Files
@@ -370,6 +390,16 @@ except Exception as e:
 - **python-mpv** (1.0+) - MPV player bindings
 - **libtorrent** (2.0+) - Torrent protocol
 - **aiofiles** (23.0+) - Async file I/O
+- **python-dotenv** (1.0+) - Environment variable management
+
+### Search & Metadata
+- **beautifulsoup4** (4.12+) - HTML parsing for torrent search
+- **lxml** (5.0+) - Fast XML/HTML parsing
+- **py-rutracker-client** (0.1+) - RuTracker API client
+
+### Setup & Configuration
+- **qrcode[pil]** (7.4+) - QR code generation for WiFi setup
+- **Pillow** - Image processing for QR codes
 
 ### Development
 - **ruff** (0.8+) - Linter and formatter
@@ -378,6 +408,7 @@ except Exception as e:
 - `libmpv-dev`, `mpv` - Media player
 - `cec-utils` - HDMI-CEC control
 - `python3.11` - Python interpreter
+- `network-manager` - WiFi hotspot and connection management
 
 ---
 
