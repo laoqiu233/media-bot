@@ -206,4 +206,3 @@ def get_watch_progress_manager(data_dir: Path) -> WatchProgressManager:
     if _watch_progress_manager is None:
         _watch_progress_manager = WatchProgressManager(data_dir)
     return _watch_progress_manager
-

@@ -15,10 +15,10 @@ from app.bot.screens.base import (
     ScreenRenderResult,
 )
 from app.library.manager import LibraryManager
+from app.library.models import MediaType
 from app.player.mpv_controller import MPVController
 from app.torrent.downloader import TorrentDownloader
 from app.tv.hdmi_cec import CECController
-from app.library.models import MediaType
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ class StatusScreen(Screen):
             movies_count = len([m for m in media_entities if m.media_type == MediaType.MOVIE])
             series_count = len([m for m in media_entities if m.media_type == MediaType.SERIES])
 
-            status_text += f"\n📥 *Downloads:*\n"
+            status_text += "\n📥 *Downloads:*\n"
             status_text += f"Active: {len(active_downloads)}\n"
             if paused_downloads:
                 status_text += f"Paused: {len(paused_downloads)}\n"

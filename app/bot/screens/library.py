@@ -10,7 +10,6 @@ from app.bot.callback_data import (
     LIBRARY_CLEAR_FILTER,
     LIBRARY_DELETE,
     LIBRARY_DELETE_FILE,
-    LIBRARY_TOGGLE_DELETE_FILES_MODE,
     LIBRARY_NEXT_PAGE,
     LIBRARY_PLAY,
     LIBRARY_PREV_PAGE,
@@ -18,6 +17,7 @@ from app.bot.callback_data import (
     LIBRARY_SELECT_ENTITY,
     LIBRARY_SHOW_MOVIES,
     LIBRARY_SHOW_SERIES,
+    LIBRARY_TOGGLE_DELETE_FILES_MODE,
 )
 from app.bot.screens.base import (
     Context,
@@ -50,6 +50,7 @@ class LibraryScreenState:
     selected_entity: MediaEntity | None = None
     delete_files_mode: bool = False
 
+
 class LibraryScreen(Screen):
     """Screen for browsing and managing library content."""
 
@@ -75,7 +76,7 @@ class LibraryScreen(Screen):
         """Called when entering the screen."""
         # Check if we're returning with a saved state (e.g., from player)
         saved_state = kwargs.get("library_state")
-        
+
         if saved_state:
             # Restore the full library state
             context.update_context(**{LIBRARY_SCREEN_STATE: saved_state})
@@ -110,6 +111,106 @@ class LibraryScreen(Screen):
         state.movies_list = movies
         state.series_list = series
 
+    async def _calculate_entity_depth(self, entity: MediaEntity | None) -> int:
+        """Calculate the depth of an entity in the tree hierarchy.
+        
+        Args:
+            entity: The entity to calculate depth for (None = root)
+            
+        Returns:
+            Depth level (0 = root/list view, 1 = movie/series, 2 = season, 3 = episode)
+        """
+        if entity is None:
+            return 0
+        
+        depth = 1
+        current = entity
+        
+        # Walk up the tree to count depth
+        while True:
+            parent = await self.library.get_parent_entity(current)
+            if parent is None:
+                break
+            depth += 1
+            current = parent
+        
+        return depth
+    
+    async def _adjust_pagination_after_deletion(self, context: Context):
+        """Adjust pagination to ensure current page is valid after deletion.
+        
+        This handles:
+        1. List view pagination (entity_list_page)
+        2. Entity detail pagination for children/files (entity_pages_list[-1])
+        3. entity_pages_list length to match tree depth after cascading deletes
+        
+        Args:
+            context: Screen context
+        """
+        state = self._get_state(context)
+        
+        # First, adjust entity_pages_list length to match the new depth
+        if state.selected_entity is not None:
+            # Calculate the depth of the current entity
+            expected_depth = await self._calculate_entity_depth(state.selected_entity)
+            current_length = len(state.entity_pages_list)
+            
+            # Adjust length to match depth
+            if current_length > expected_depth:
+                # Trim excess pages (happened during cascading delete)
+                state.entity_pages_list = state.entity_pages_list[:expected_depth]
+            elif current_length < expected_depth:
+                # Shouldn't happen, but add pages if needed
+                while len(state.entity_pages_list) < expected_depth:
+                    state.entity_pages_list.append(0)
+        else:
+            # No entity selected, should be at root
+            state.entity_pages_list = []
+        
+        # Now adjust the current page value if in entity detail view
+        if state.selected_entity is not None and state.entity_pages_list:
+            entity = state.selected_entity
+            
+            # Determine item count based on entity type
+            if entity.media_type in (MediaType.MOVIE, MediaType.EPISODE):
+                # Paginating files
+                item_count = len(entity.downloaded_files)
+            else:
+                # Paginating children (seasons/episodes)
+                children = await self.library.get_child_entities(entity)
+                item_count = len(children)
+            
+            # Calculate max valid page
+            if item_count > 0:
+                max_page = (item_count - 1) // ITEMS_PER_PAGE
+            else:
+                max_page = 0
+            
+            # Adjust current page if out of bounds
+            if state.entity_pages_list[-1] > max_page:
+                state.entity_pages_list[-1] = max_page
+                
+        # Also adjust list view pagination if applicable
+        elif state.view in ("movies", "series"):
+            # Get the current entity list based on view
+            if state.view == "movies":
+                entity_list = state.movies_list
+            else:  # series
+                entity_list = state.series_list
+            
+            # Apply filter if active
+            filtered = self._get_filtered_entities(entity_list, state.filter_query)
+            
+            # Calculate max valid page (0-indexed)
+            if filtered:
+                max_page = (len(filtered) - 1) // ITEMS_PER_PAGE
+            else:
+                max_page = 0
+            
+            # Adjust current page if out of bounds
+            if state.entity_list_page > max_page:
+                state.entity_list_page = max_page
+
     async def render(self, context: Context) -> ScreenRenderResult:
         """Render the screen based on current view state."""
         state = self._get_state(context)
@@ -117,6 +218,10 @@ class LibraryScreen(Screen):
         if state.view == "main":
             return await self._render_main(context)
         elif state.selected_entity is not None:
+            # Refresh entity from library to get latest data (e.g., new files)
+            refreshed_entity = await self.library.get_entity(state.selected_entity.imdb_id)
+            if refreshed_entity is not None:
+                state.selected_entity = refreshed_entity
             return await self._render_entity_detail(context)
         elif state.view == "movies":
             return await self._render_movies_list(context)
@@ -344,19 +449,31 @@ class LibraryScreen(Screen):
                         )
                     videos_pagination_buttons = []
                     if page > 0:
-                        videos_pagination_buttons.append(InlineKeyboardButton("« Previous", callback_data=LIBRARY_PREV_PAGE))
+                        videos_pagination_buttons.append(
+                            InlineKeyboardButton("« Previous", callback_data=LIBRARY_PREV_PAGE)
+                        )
                     if end_idx < len(entity.downloaded_files):
-                        videos_pagination_buttons.append(InlineKeyboardButton("Next »", callback_data=LIBRARY_NEXT_PAGE))
+                        videos_pagination_buttons.append(
+                            InlineKeyboardButton("Next »", callback_data=LIBRARY_NEXT_PAGE)
+                        )
                     if videos_pagination_buttons:
                         keyboard.append(videos_pagination_buttons)
 
                     if state.delete_files_mode:
                         keyboard.append(
-                            [InlineKeyboardButton("📂 Watch Files", callback_data=LIBRARY_TOGGLE_DELETE_FILES_MODE)]
+                            [
+                                InlineKeyboardButton(
+                                    "📂 Watch Files", callback_data=LIBRARY_TOGGLE_DELETE_FILES_MODE
+                                )
+                            ]
                         )
                     else:
                         keyboard.append(
-                            [InlineKeyboardButton("🗑️ Delete Files", callback_data=LIBRARY_TOGGLE_DELETE_FILES_MODE)]
+                            [
+                                InlineKeyboardButton(
+                                    "🗑️ Delete Files", callback_data=LIBRARY_TOGGLE_DELETE_FILES_MODE
+                                )
+                            ]
                         )
         else:
             children = await self.library.get_child_entities(entity)
@@ -524,11 +641,27 @@ class LibraryScreen(Screen):
                 state.selected_entity = await self.library.get_entity(next_entity)
             else:
                 state.selected_entity = None
-        
+            # Refresh entity lists after deletion
+            self._update_entities_in_state(context)
+            # Adjust page if current page is now out of bounds
+            await self._adjust_pagination_after_deletion(context)
+
         elif query.data.startswith(LIBRARY_DELETE_FILE):
             file_id = query.data[len(LIBRARY_DELETE_FILE) :]
             if state.selected_entity is not None:
-                await self.library.delete_file(state.selected_entity.imdb_id, file_id)
+                next_entity_id = await self.library.delete_file(
+                    state.selected_entity.imdb_id, file_id
+                )
+                # If the entity was deleted (no more files), update state
+                if next_entity_id != state.selected_entity.imdb_id:
+                    if next_entity_id is not None:
+                        state.selected_entity = await self.library.get_entity(next_entity_id)
+                    else:
+                        state.selected_entity = None
+                # Refresh entity lists after deletion
+                self._update_entities_in_state(context)
+                # Adjust page if current page is now out of bounds
+                await self._adjust_pagination_after_deletion(context)
 
     async def handle_message(self, message: Message, context: Context) -> ScreenHandlerResult:
         """Handle text messages for filtering."""

@@ -122,15 +122,17 @@ class TorrentDownloader:
             with suppress(AttributeError):
                 # Even older API
                 self.session.listen_on(6881, 6891)
-            
+
             # Try to enable DHT and other discovery for older API
             try:
-                self.session.set_settings({
-                    "enable_dht": True,
-                    "enable_lsd": True,
-                    "enable_upnp": True,
-                    "enable_natpmp": True,
-                })
+                self.session.set_settings(
+                    {
+                        "enable_dht": True,
+                        "enable_lsd": True,
+                        "enable_upnp": True,
+                        "enable_natpmp": True,
+                    }
+                )
             except (AttributeError, TypeError):
                 logger.warning("Could not configure DHT settings for libtorrent 1.x")
 
@@ -747,7 +749,7 @@ class TorrentDownloader:
                         params.save_path = str(self.download_path)
                         # Set file priorities using attribute assignment (not item assignment)
                         params.file_priorities = persistent_state.file_priorities
-                        
+
                         # Check for fastresume data
                         fastresume_path = self.download_path / "torrents" / f"{task_id}.fastresume"
                         if fastresume_path.exists():
@@ -772,7 +774,7 @@ class TorrentDownloader:
                             "ti": torrent_info,
                             "file_priorities": persistent_state.file_priorities,
                         }
-                        
+
                         # Check for fastresume data (for dict-based params)
                         fastresume_path = self.download_path / "torrents" / f"{task_id}.fastresume"
                         if fastresume_path.exists():

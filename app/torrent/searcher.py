@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
@@ -11,8 +12,6 @@ from py_rutracker import AsyncRuTrackerClient
 
 from app.config import Config
 from app.library.models import DownloadIMDbMetadata, VideoQuality
-
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -54,11 +53,7 @@ class RuTrackerTorrentSearchResult(TorrentSearchResult):
         if username is None or password is None:
             raise ValueError("RuTracker credentials are not set")
 
-        async with AsyncRuTrackerClient(
-            username,
-            password,
-            proxy or ""
-        ) as client:
+        async with AsyncRuTrackerClient(username, password, proxy or "") as client:
             content = await client.download(self.torrent_file_link)
             temp_dir = Path("/tmp")
             temp_file = temp_dir / f"torrent_search_{hash(self.torrent_file_link)}.torrent"

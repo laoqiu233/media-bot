@@ -4,7 +4,6 @@ import asyncio
 import logging
 import re
 import time
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +22,9 @@ class CECController:
         self.enabled = enabled
         self._cec_available: bool | None = None
         self._lock = asyncio.Lock()  # Lock to prevent concurrent cec-ctl usage
-        self._persistent_process: Optional[asyncio.subprocess.Process] = None
-        self._current_command: Optional[str] = None  # Track current running command
-        self._status_cache: Optional[dict] = None  # Cached status
+        self._persistent_process: asyncio.subprocess.Process | None = None
+        self._current_command: str | None = None  # Track current running command
+        self._status_cache: dict | None = None  # Cached status
         self._status_cache_time: float = 0.0  # Timestamp of cached status
         self._status_cache_ttl: float = (
             10.0  # Cache TTL in seconds (10 seconds for faster power status updates)
@@ -120,7 +119,7 @@ class CECController:
                 self._current_command = None
                 return False, str(e)
 
-    def get_current_command(self) -> Optional[str]:
+    def get_current_command(self) -> str | None:
         """Get the currently running CEC command.
 
         Returns:

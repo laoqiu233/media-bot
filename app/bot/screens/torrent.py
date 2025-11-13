@@ -1,5 +1,6 @@
 """Unified torrent screen for provider selection and results display."""
 
+import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
@@ -34,8 +35,6 @@ from app.library.models import (
 from app.torrent.downloader import TorrentDownloader
 from app.torrent.searcher import TorrentSearcher, TorrentSearchResult
 from app.torrent.validator import TorrentValidator
-
-import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -230,11 +229,7 @@ class TorrentScreen(Screen):
 
         # Show results with details in text
         for i, result in enumerate(page_results):
-            safe_title = (
-                result.title.replace("*", "\\*")
-                .replace("_", "\\_")
-                .replace("`", "\\`")
-            )
+            safe_title = result.title.replace("*", "\\*").replace("_", "\\_").replace("`", "\\`")
             text += f"{i + 1}. *{safe_title}*\n"
             text += f"   📁 {result.quality.value.capitalize()} • {result.size} • 🌱 {result.seeders} seeders\n\n"
 

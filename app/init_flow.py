@@ -727,7 +727,7 @@ async def _display_with_mpv(image_path: Path) -> subprocess.Popen:
         "--image-display-duration=inf",
         "--loop-file=inf",
         "--fs",
-#        "--ontop",
+        #        "--ontop",
         "--no-border",
         "--no-window-dragging",
         "--no-input-default-bindings",
@@ -1062,7 +1062,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
                             await asyncio.wait_for(
                                 asyncio.to_thread(loading_proc.wait), timeout=1.0
                             )
-                        except asyncio.TimeoutError:
+                        except TimeoutError:
                             loading_proc.kill()
                             await asyncio.to_thread(loading_proc.wait)
                         print("[init] Stopped loading.gif after QR code screen loaded")
@@ -1098,7 +1098,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
                                 await asyncio.wait_for(
                                     asyncio.to_thread(loading_proc.wait), timeout=0.5
                                 )
-                            except asyncio.TimeoutError:
+                            except TimeoutError:
                                 loading_proc.kill()
                                 await asyncio.to_thread(loading_proc.wait)
                         except Exception:
@@ -1119,7 +1119,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
                     mpv_proc.terminate()
                     try:
                         await asyncio.wait_for(asyncio.to_thread(mpv_proc.wait), timeout=1.0)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         mpv_proc.kill()
                         await asyncio.to_thread(mpv_proc.wait)
                 except Exception as e:
@@ -1178,7 +1178,7 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
                 content = []
             new_lines = _append_or_replace_env_line(content, "TRACKER_USERNAME", username)
             new_lines = _append_or_replace_env_line(new_lines, "TRACKER_PASSWORD", password)
-            
+
             # Save proxy if provided, otherwise remove it if it exists
             if proxy is not None and proxy:
                 proxy_value = proxy
@@ -1190,7 +1190,7 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
                 new_lines = _remove_env_line(new_lines, "TRACKER_PROXY")
                 os.environ.pop("TRACKER_PROXY", None)
                 print("[init] Removed TRACKER_PROXY (empty or not provided)")
-            
+
             env_path.write_text("".join(new_lines), encoding="utf-8")
 
             os.environ["TRACKER_USERNAME"] = username
@@ -1226,7 +1226,7 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
             env_tracker_username = tracker_username or ""
             env_tracker_password = tracker_password or ""
             env_tracker_proxy = os.getenv("TRACKER_PROXY", "")
-            
+
             env_path = _project_root() / ".env"
             if env_path.exists():
                 content = env_path.read_text(encoding="utf-8")
@@ -1237,7 +1237,7 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
                         env_tracker_password = line.split("=", 1)[1]
                     elif line.startswith("TRACKER_PROXY="):
                         env_tracker_proxy = line.split("=", 1)[1]
-            
+
             html = _render_template(
                 "rutracker_setup.html",
                 ERROR_BOX="",
@@ -1256,9 +1256,9 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
             import html as html_module
 
             data = await request.post()
-            username = (data.get("tracker_username") or "")
-            password = (data.get("tracker_password") or "")
-            proxy = (data.get("tracker_proxy") or "")
+            username = data.get("tracker_username") or ""
+            password = data.get("tracker_password") or ""
+            proxy = data.get("tracker_proxy") or ""
 
             # Validate input
             if not username or not password:
@@ -1275,10 +1275,10 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
             # Save credentials (proxy is optional)
             # Pass proxy as-is if it's not empty, otherwise pass None
             proxy_value = proxy if proxy else None
-            print(f"[init] Saving RuTracker credentials - username: {username[:10]}..., proxy: {proxy_value}")
-            success, error_msg = await on_credentials_saved(
-                username, password, proxy_value
+            print(
+                f"[init] Saving RuTracker credentials - username: {username[:10]}..., proxy: {proxy_value}"
             )
+            success, error_msg = await on_credentials_saved(username, password, proxy_value)
 
             if success:
                 return web.Response(
@@ -1331,7 +1331,7 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
 
         setup_url = f"http://{host_ip}:{bound_port}/"
         print(f"[init] RuTracker setup URL: {setup_url}")
-        print(f"[init] Please open this URL in your browser to enter RuTracker credentials.")
+        print("[init] Please open this URL in your browser to enter RuTracker credentials.")
 
         # Wait for credentials with a timeout check in background
         async def wait_for_credentials():

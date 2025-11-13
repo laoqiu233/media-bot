@@ -52,7 +52,9 @@ class ScreenRegistry:
         self.player_screen = PlayerScreen(mpv_controller, cec_controller)
         self.audio_track_selection_screen = AudioTrackSelectionScreen(mpv_controller)
         self.subtitle_selection_screen = SubtitleSelectionScreen(mpv_controller)
-        self.status_screen = StatusScreen(mpv_controller, cec_controller, torrent_downloader, library_manager)
+        self.status_screen = StatusScreen(
+            mpv_controller, cec_controller, torrent_downloader, library_manager
+        )
         self.tv_screen = TVScreen(cec_controller)
         self.setup_confirmation_screen = SetupConfirmationScreen()
         self.system_control_screen = SystemControlScreen()

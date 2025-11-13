@@ -49,9 +49,7 @@ def _detect_local_ip() -> str:
 def _detect_screen_resolution() -> tuple[int, int]:
     """Detect screen resolution, defaulting to 1920x1080 if detection fails."""
     try:
-        result = subprocess.run(
-            ["xrandr"], capture_output=True, text=True, timeout=2
-        )
+        result = subprocess.run(["xrandr"], capture_output=True, text=True, timeout=2)
         if result.returncode == 0:
             for line in result.stdout.splitlines():
                 if " connected " in line and "x" in line:
@@ -66,21 +64,21 @@ def _detect_screen_resolution() -> tuple[int, int]:
                                 continue
     except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
         pass
-    
+
     # Default to 1920x1080 (common TV resolution)
     return 1920, 1080
 
 
 def _generate_styled_qr_png(url: str, out_path: Path) -> None:
     """Generate a styled QR code PNG image similar to init_flow.
-    
+
     Args:
         url: URL to encode in QR code
         out_path: Path where to save the PNG image
     """
     # Detect screen resolution for responsive design
     screen_width, screen_height = _detect_screen_resolution()
-    
+
     # Generate QR code with high error correction for mobile scanning
     qr_factory = qrcode.QRCode(
         version=1,
@@ -91,14 +89,14 @@ def _generate_styled_qr_png(url: str, out_path: Path) -> None:
     qr_factory.add_data(url)
     qr_factory.make(fit=True)
     url_qr = qr_factory.make_image(fill_color="black", back_color="white").convert("RGB")
-    
+
     # Responsive sizing based on screen resolution
     base_size = min(screen_width, screen_height) * 0.3  # 30% of smaller dimension
     qr_size = max(int(base_size), 500)  # Minimum 500px for scanning, scales up for TV
-    
+
     # Scale QR code
     url_qr = url_qr.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
-    
+
     # Responsive spacing and layout
     scale_factor = min(screen_width / 1920, screen_height / 1080, 1.5)
     padding = int(60 * scale_factor)
@@ -106,22 +104,22 @@ def _generate_styled_qr_png(url: str, out_path: Path) -> None:
     label_height = int(70 * scale_factor)
     text_height = int(100 * scale_factor)
     card_border = int(20 * scale_factor)
-    
+
     # Calculate layout
     width = screen_width
     height = screen_height
-    
+
     # Center content
     content_width = padding * 2 + qr_size
     content_height = padding * 2 + title_height + qr_size + label_height + text_height
-    
+
     offset_x = (width - content_width) // 2 if content_width < width else 0
     offset_y = (height - content_height) // 2 if content_height < height else 0
-    
+
     # Create base image with gradient background (matching init_flow style)
     img = Image.new("RGB", (width, height), color=(2, 6, 23))  # #020617
     draw = ImageDraw.Draw(img)
-    
+
     # Fast linear gradient
     step = max(4, height // 200)
     for y in range(0, height, step):
@@ -136,57 +134,67 @@ def _generate_styled_qr_png(url: str, out_path: Path) -> None:
             r = int(15 - (15 - 2) * local_ratio)
             g = int(23 - (23 - 6) * local_ratio)
             b = int(42 - (42 - 23) * local_ratio)
-        
+
         draw.rectangle([(0, y), (width, min(y + step, height))], fill=(r, g, b))
-    
+
     # Load fonts
     font_size_title = int(44 * scale_factor)
     font_size_label = int(30 * scale_factor)
     font_size_text = int(24 * scale_factor)
-    
+
     try:
         font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", font_size_title)
         font_label = ImageFont.truetype("DejaVuSans-Bold.ttf", font_size_label)
         font_text = ImageFont.truetype("DejaVuSans.ttf", font_size_text)
     except Exception:
         try:
-            font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size_title)
-            font_label = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size_label)
-            font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size_text)
+            font_title = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size_title
+            )
+            font_label = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size_label
+            )
+            font_text = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size_text
+            )
         except Exception:
             font_title = ImageFont.load_default()
             font_label = ImageFont.load_default()
             font_text = ImageFont.load_default()
-    
+
     # Title
     title_text = "RuTracker Setup"
     title_bbox = draw.textbbox((0, 0), title_text, font=font_title)
     title_width = title_bbox[2] - title_bbox[0]
-    title_x = offset_x + (content_width - title_width) // 2 if content_width < width else (width - title_width) // 2
+    title_x = (
+        offset_x + (content_width - title_width) // 2
+        if content_width < width
+        else (width - title_width) // 2
+    )
     title_y = offset_y + padding
-    
+
     # Draw title shadow and main title
     draw.text((title_x + 2, title_y + 2), title_text, fill=(0, 0, 0), font=font_title)
     draw.text((title_x, title_y), title_text, fill=(255, 255, 255), font=font_title)
-    
+
     # Label
     label_text = "Scan QR Code"
     label_bbox = draw.textbbox((0, 0), label_text, font=font_label)
     label_width = label_bbox[2] - label_bbox[0]
     label_x = offset_x + padding + (qr_size - label_width) // 2
     label_y = offset_y + padding + title_height + 20
-    
+
     draw.text((label_x + 1, label_y + 1), label_text, fill=(0, 0, 0), font=font_label)
     draw.text((label_x, label_y), label_text, fill=(255, 255, 255), font=font_label)
-    
+
     # QR code position
     qr_y = offset_y + padding + title_height + label_height + 25
     qr_x = offset_x + padding
-    
+
     # Card background
     card_bg_color = (15, 23, 42)
     card_border_color = (148, 163, 184)
-    
+
     # Draw card shadow
     shadow_offset = int(8 * scale_factor)
     for offset in range(shadow_offset, 0, -2):
@@ -203,7 +211,7 @@ def _generate_styled_qr_png(url: str, out_path: Path) -> None:
             shadow_draw.rectangle(shadow_rect, fill=(0, 0, 0, alpha))
             img = Image.alpha_composite(img.convert("RGBA"), shadow_overlay).convert("RGB")
             draw = ImageDraw.Draw(img)
-    
+
     # Draw card background
     card_overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     card_draw = ImageDraw.Draw(card_overlay)
@@ -216,23 +224,28 @@ def _generate_styled_qr_png(url: str, out_path: Path) -> None:
     card_draw.rectangle(card_rect, fill=(*card_bg_color, 235))
     img = Image.alpha_composite(img.convert("RGBA"), card_overlay).convert("RGB")
     draw = ImageDraw.Draw(img)
-    
+
     # Card border
     border_width = max(1, int(scale_factor))
     draw.rectangle(
-        [qr_x - card_border, qr_y - card_border,
-         qr_x + qr_size + card_border, qr_y + qr_size + card_border],
-        outline=card_border_color, width=border_width
+        [
+            qr_x - card_border,
+            qr_y - card_border,
+            qr_x + qr_size + card_border,
+            qr_y + qr_size + card_border,
+        ],
+        outline=card_border_color,
+        width=border_width,
     )
-    
+
     # Paste QR code
     img.paste(url_qr, (qr_x, qr_y))
-    
+
     # Text below QR code
     text_y = qr_y + qr_size + int(40 * scale_factor)
     url_text = f"URL:\n{url}"
     url_lines = url_text.split("\n")
-    
+
     line_height = int(36 * scale_factor)
     for i, line in enumerate(url_lines):
         line_bbox = draw.textbbox((0, 0), line, font=font_text)
@@ -240,17 +253,17 @@ def _generate_styled_qr_png(url: str, out_path: Path) -> None:
         line_x = qr_x + (qr_size - line_width) // 2
         draw.text((line_x + 2, text_y + i * line_height + 2), line, fill=(0, 0, 0), font=font_text)
         draw.text((line_x, text_y + i * line_height), line, fill=(220, 240, 255), font=font_text)
-    
+
     # Save with maximum quality
     img.save(out_path, quality=100, optimize=False)
 
 
 async def _load_file_in_mpv(file_path: Path) -> subprocess.Popen:
     """Launch a new mpv process to display the provided image fullscreen in a loop.
-    
+
     Args:
         file_path: Path to the file to display
-        
+
     Returns:
         The mpv process
     """
@@ -292,7 +305,6 @@ async def _load_file_in_mpv(file_path: Path) -> subprocess.Popen:
     return proc
 
 
-
 class RuTrackerAuthScreen(Screen):
     """Screen for RuTracker authorization setup."""
 
@@ -324,16 +336,14 @@ class RuTrackerAuthScreen(Screen):
         """Called when leaving the screen."""
         try:
             project_root = _project_root()
-            
+
             # Stop QR code mpv process if running
             if self._mpv_proc is not None and self._mpv_proc.poll() is None:
                 try:
                     self._mpv_proc.terminate()
                     try:
-                        await asyncio.wait_for(
-                            asyncio.to_thread(self._mpv_proc.wait), timeout=1.0
-                        )
-                    except asyncio.TimeoutError:
+                        await asyncio.wait_for(asyncio.to_thread(self._mpv_proc.wait), timeout=1.0)
+                    except TimeoutError:
                         self._mpv_proc.kill()
                         await asyncio.to_thread(self._mpv_proc.wait)
                 except Exception as e:
@@ -343,7 +353,7 @@ class RuTrackerAuthScreen(Screen):
                             self._mpv_proc.kill()
                     except Exception:
                         pass
-                        
+
             # Clear our references
             self._mpv_proc = None
         except Exception as e:
@@ -417,18 +427,17 @@ class RuTrackerAuthScreen(Screen):
             # Generate and display QR code on TV screen (following init_flow pattern)
             host_ip = _detect_local_ip()
             setup_url = f"http://{host_ip}:8766/"
-            
+
             try:
                 await query.answer("Displaying QR code on screen...", show_alert=False)
-                
-                
+
                 project_root = _project_root()
-                
+
                 # Prepare QR code image path
                 tmp_dir = project_root / ".setup"
                 tmp_dir.mkdir(parents=True, exist_ok=True)
                 qr_png = tmp_dir / "rutracker_qr.png"
-                
+
                 # Generate styled QR code image (like init_flow)
                 _generate_styled_qr_png(setup_url, qr_png)
                 await asyncio.sleep(1.5)
@@ -436,14 +445,14 @@ class RuTrackerAuthScreen(Screen):
                 self._mpv_proc = await _load_file_in_mpv(qr_png)
                 logger.info("Displaying RuTracker QR code on screen in new mpv process")
                 # Wait for QR code to be visible
-                
+
             except Exception as e:
                 logger.error(f"Error displaying QR code: {e}", exc_info=True)
                 await query.answer("Error displaying QR code", show_alert=True)
-            
+
             # Stay on current screen
             return None
-        
+
         elif query.data == RUTRACKER_AUTH_CHECK:
             # Check if credentials have been loaded
             await query.answer("Checking status...", show_alert=False)

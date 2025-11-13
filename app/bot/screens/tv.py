@@ -134,7 +134,7 @@ class TVScreen(Screen):
     async def _tv_on(self, query: CallbackQuery) -> None:
         try:
             current_cmd = self.cec.get_current_command()
-            status_msg = f"Turning TV on..."
+            status_msg = "Turning TV on..."
             await query.answer(status_msg)
             success = await self.cec.tv_on()
 
@@ -150,7 +150,7 @@ class TVScreen(Screen):
     async def _tv_off(self, query: CallbackQuery) -> None:
         try:
             current_cmd = self.cec.get_current_command()
-            status_msg = f"Turning TV off..."
+            status_msg = "Turning TV off..."
             await query.answer(status_msg)
             success = await self.cec.tv_off()
 
@@ -166,7 +166,7 @@ class TVScreen(Screen):
     async def _set_active_source(self, query: CallbackQuery) -> None:
         try:
             current_cmd = self.cec.get_current_command()
-            status_msg = f"Setting active source..."
+            status_msg = "Setting active source..."
             await query.answer(status_msg)
             success = await self.cec.set_active_source()
 
@@ -182,7 +182,7 @@ class TVScreen(Screen):
     async def _volume_up(self, query: CallbackQuery) -> None:
         try:
             current_cmd = self.cec.get_current_command()
-            status_msg = f"Volume up +5..."
+            status_msg = "Volume up +5..."
             await query.answer(status_msg)
             success = await self.cec.volume_up()
             await query.answer("🔊 Volume up +5" if success else "Failed")
@@ -193,7 +193,7 @@ class TVScreen(Screen):
     async def _volume_down(self, query: CallbackQuery) -> None:
         try:
             current_cmd = self.cec.get_current_command()
-            status_msg = f"Volume down -5..."
+            status_msg = "Volume down -5..."
             await query.answer(status_msg)
             success = await self.cec.volume_down()
             await query.answer("🔉 Volume down -5" if success else "Failed")
@@ -204,7 +204,7 @@ class TVScreen(Screen):
     async def _mute(self, query: CallbackQuery) -> None:
         try:
             current_cmd = self.cec.get_current_command()
-            status_msg = f"Muting..."
+            status_msg = "Muting..."
             await query.answer(status_msg)
             success = await self.cec.mute()
             await query.answer("🔇 Mute toggled" if success else "Failed")

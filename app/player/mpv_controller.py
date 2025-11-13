@@ -111,6 +111,7 @@ class MPVController:
 
             @self._player.event_callback("end-file")
             def end_file_callback(event):
+<<<<<<< HEAD
                 # When switching files, loadfile() triggers end-file for the old file.
                 # In play(), we set _is_playing = True and _current_file BEFORE calling loadfile(),
                 # so if _is_playing is True when end-file fires, it means we're switching files.
@@ -154,11 +155,24 @@ class MPVController:
                         self._watch_progress_manager is not None
                         and file_to_save is not None
                     ):
+=======
+                # Save watch progress before cleaning up
+                current_file = self._current_file
+
+                self._is_playing = False
+                self._current_file = None
+                self._trigger_event("playback_finished", event)
+
+                # Resume all downloads when playback ends
+                async def save_progress_resume_downloads_and_show_loading():
+                    # Save watch progress first
+                    if self._watch_progress_manager is not None and current_file is not None:
+>>>>>>> a4fb724 (Fix library navigation and magnet links)
                         try:
                             # Get final position and duration
                             position = self._player.time_pos if self._player else None
                             duration = self._player.duration if self._player else None
-                            
+
                             if position is not None and duration is not None:
                                 await self._watch_progress_manager.update_progress(
                                     file_path=file_to_save,
@@ -173,6 +187,7 @@ class MPVController:
                                     f"Could not get position/duration for {file_to_save.name}, progress not saved"
                                 )
                         except Exception as e:
+<<<<<<< HEAD
                             logger.error(f"Error saving watch progress: {e}", exc_info=True)
 
                 # Resume downloads and show loading.gif (only if not switching files)
@@ -185,6 +200,10 @@ class MPVController:
                         logger.debug("File switch detected (is_playing=True), skipping download resume and loading.gif")
                         return
                     
+=======
+                            logger.error(f"Error saving watch progress: {e}")
+
+>>>>>>> a4fb724 (Fix library navigation and magnet links)
                     # Resume downloads
                     if self._downloader is not None:
                         try:
@@ -480,14 +499,11 @@ class MPVController:
 
         try:
             # Save watch progress before stopping
-            if (
-                self._watch_progress_manager is not None
-                and self._current_file is not None
-            ):
+            if self._watch_progress_manager is not None and self._current_file is not None:
                 try:
                     position = self._player.time_pos
                     duration = self._player.duration
-                    
+
                     if position is not None and duration is not None:
                         await self._watch_progress_manager.update_progress(
                             file_path=self._current_file,
@@ -776,13 +792,15 @@ class MPVController:
             subtitle_tracks = []
             for track in track_list:
                 if track.get("type") == "sub":
-                    subtitle_tracks.append({
-                        "id": track.get("id"),
-                        "title": track.get("title", ""),
-                        "lang": track.get("lang", ""),
-                        "codec": track.get("codec", ""),
-                        "selected": track.get("selected", False),
-                    })
+                    subtitle_tracks.append(
+                        {
+                            "id": track.get("id"),
+                            "title": track.get("title", ""),
+                            "lang": track.get("lang", ""),
+                            "codec": track.get("codec", ""),
+                            "selected": track.get("selected", False),
+                        }
+                    )
 
             return subtitle_tracks
         except Exception as e:
@@ -1007,7 +1025,7 @@ class MPVController:
                 "--image-display-duration=inf",
                 "--loop-file=inf",
                 "--fs",
-#                "--ontop",
+                #                "--ontop",
                 "--no-border",
                 "--no-window-dragging",
                 "--no-input-default-bindings",
@@ -1069,7 +1087,7 @@ class MPVController:
                 try:
                     # Wait up to 1 second for graceful termination
                     await asyncio.wait_for(asyncio.to_thread(self._loading_proc.wait), timeout=1.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # Force kill if it doesn't terminate
                     self._loading_proc.kill()
                     await asyncio.to_thread(self._loading_proc.wait)

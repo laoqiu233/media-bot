@@ -74,7 +74,9 @@ class SubtitleSelectionScreen(Screen):
 
             # Show current subtitle status
             if current_track_id is not None:
-                current_track = next((t for t in subtitle_tracks if t["id"] == current_track_id), None)
+                current_track = next(
+                    (t for t in subtitle_tracks if t["id"] == current_track_id), None
+                )
                 if current_track:
                     track_label = self._format_track_label(current_track)
                     text += f"Current: *{track_label}*\n\n"
@@ -89,27 +91,33 @@ class SubtitleSelectionScreen(Screen):
             for track in subtitle_tracks:
                 track_id = track["id"]
                 track_label = self._format_track_label(track)
-                
+
                 # Mark current track
                 if current_track_id == track_id:
                     button_text = f"✅ {track_label}"
                 else:
                     button_text = track_label
 
-                keyboard.append([
-                    InlineKeyboardButton(
-                        button_text,
-                        callback_data=f"{SUBTITLE_SELECT}{track_id}",
-                    )
-                ])
+                keyboard.append(
+                    [
+                        InlineKeyboardButton(
+                            button_text,
+                            callback_data=f"{SUBTITLE_SELECT}{track_id}",
+                        )
+                    ]
+                )
 
             # Add remove subtitles button
-            keyboard.append([
-                InlineKeyboardButton(
-                    "🚫 Remove Subtitles" if current_track_id is not None else "🚫 No Subtitles",
-                    callback_data=SUBTITLE_REMOVE,
-                )
-            ])
+            keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        "🚫 Remove Subtitles"
+                        if current_track_id is not None
+                        else "🚫 No Subtitles",
+                        callback_data=SUBTITLE_REMOVE,
+                    )
+                ]
+            )
 
             # Add back button
             keyboard.append([InlineKeyboardButton("⬅️ Back to Player", callback_data=SUBTITLE_BACK)])
@@ -134,7 +142,7 @@ class SubtitleSelectionScreen(Screen):
             Formatted track label
         """
         parts = []
-        
+
         # Add track number
         parts.append(f"Track {track['id']}")
 
@@ -218,4 +226,3 @@ class SubtitleSelectionScreen(Screen):
             logger.error(f"Error handling subtitle selection callback: {e}", exc_info=True)
             await query.answer("Error", show_alert=True)
             return None
-

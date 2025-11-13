@@ -44,11 +44,11 @@ class TorrentMetadataFetcher:
         try:
             # For metadata fetching, we use add_magnet_uri which is simpler
             # DON'T pause - we need it active to connect to peers and fetch metadata
-            
+
             # Parse magnet URI to get add_torrent_params
             logger.info("Parsing magnet URI...")
             params = lt.parse_magnet_uri(magnet_link)
-            
+
             # Set save_path (required by libtorrent) using attribute assignment
             logger.info("Setting save_path to /tmp...")
             try:
@@ -57,7 +57,7 @@ class TorrentMetadataFetcher:
             except Exception as e:
                 logger.error(f"Failed to set save_path on parsed params: {e}", exc_info=True)
                 raise
-            
+
             # Add torrent to session (will be active to connect to peers for metadata)
             logger.info("Adding torrent to session...")
             try:
@@ -66,16 +66,16 @@ class TorrentMetadataFetcher:
             except Exception as e:
                 logger.error(f"Failed to add torrent to session: {e}", exc_info=True)
                 raise
-            
+
             if not handle:
                 raise Exception("Failed to add torrent - all API methods failed")
-            
+
             logger.info(f"Added magnet link, waiting for metadata (timeout: {self.timeout}s)...")
 
             # Wait for metadata with timeout and progress logging
             start_time = asyncio.get_event_loop().time()
             last_log_time = start_time
-            
+
             while not handle.has_metadata():
                 await asyncio.sleep(0.5)  # Check every 0.5 seconds
                 elapsed = asyncio.get_event_loop().time() - start_time
@@ -100,7 +100,7 @@ class TorrentMetadataFetcher:
 
             # Get torrent info
             torrent_info = handle.torrent_file()
-            
+
             if not torrent_info:
                 raise Exception("Failed to get torrent info from handle")
 

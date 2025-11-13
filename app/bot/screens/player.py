@@ -228,7 +228,9 @@ class PlayerScreen(Screen):
             # Navigate to audio track selection screen, passing library state through
             saved_library_state = context.get_context().get("saved_library_state")
             if saved_library_state:
-                return Navigation(next_screen="audio_track_selection", library_state=saved_library_state)
+                return Navigation(
+                    next_screen="audio_track_selection", library_state=saved_library_state
+                )
             return Navigation(next_screen="audio_track_selection")
 
         elif query.data == PLAYER_SUBTITLES:
@@ -240,7 +242,9 @@ class PlayerScreen(Screen):
             # Navigate to subtitle selection screen, passing library state through
             saved_library_state = context.get_context().get("saved_library_state")
             if saved_library_state:
-                return Navigation(next_screen="subtitle_selection", library_state=saved_library_state)
+                return Navigation(
+                    next_screen="subtitle_selection", library_state=saved_library_state
+                )
             return Navigation(next_screen="subtitle_selection")
 
         elif query.data.startswith(PLAYER_SEEK):

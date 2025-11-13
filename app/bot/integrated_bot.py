@@ -16,7 +16,6 @@ from app.library.imdb_client import IMDbClient
 from app.library.manager import LibraryManager
 from app.player.mpv_controller import player
 from app.scheduler.series_scheduler import get_scheduler
-from app.scheduler.series_updater import SeriesUpdater
 from app.scheduler.watch_progress import get_watch_progress_manager
 from app.torrent.downloader import DownloadState, TorrentDownloader
 from app.torrent.importer import TorrentImporter

@@ -242,24 +242,36 @@ class LibraryManager:
                 for e in self._entities_cache.values()
                 if e.season_id == parent_entity.imdb_id and e.media_type == MediaType.EPISODE
             ]
-            entities.sort(key=lambda e: e.episode_number or 0, reverse=True)
+            entities.sort(key=lambda e: e.episode_number or 0)
             return entities
         return []
 
     async def create_or_update_entity(self, entity: MediaEntity):
-        """Create a new entity in the library."""
+        """Create or update an entity in the library.
+        
+        When updating an existing entity, preserves the downloaded_files list
+        to avoid losing files when metadata is refreshed.
+        """
 
         entity_dir = self._get_entity_dir(entity)
 
         if entity.media_type == MediaType.MOVIE or entity.media_type == MediaType.SERIES:
             if entity.imdb_id not in self._entities_cache:
                 entity_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                # Preserve downloaded files when updating existing entity
+                existing_entity = self._entities_cache[entity.imdb_id]
+                entity.downloaded_files = existing_entity.downloaded_files
 
         elif entity.media_type == MediaType.SEASON:
             if entity.series_id not in self._entities_cache:
                 raise ValueError(f"Parent series {entity.series_id} not found in library")
             if entity.imdb_id not in self._entities_cache:
                 entity_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                # Preserve downloaded files when updating existing entity
+                existing_entity = self._entities_cache[entity.imdb_id]
+                entity.downloaded_files = existing_entity.downloaded_files
 
         elif entity.media_type == MediaType.EPISODE:
             if entity.series_id not in self._entities_cache:
@@ -268,6 +280,10 @@ class LibraryManager:
                 raise ValueError(f"Parent season {entity.season_id} not found in library")
             if entity.imdb_id not in self._entities_cache:
                 entity_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                # Preserve downloaded files when updating existing entity
+                existing_entity = self._entities_cache[entity.imdb_id]
+                entity.downloaded_files = existing_entity.downloaded_files
 
         self._entities_cache[entity.imdb_id] = entity
         await self._save_metadata(entity_dir, entity)
@@ -290,6 +306,7 @@ class LibraryManager:
         downloaded_files_dir.mkdir(parents=True, exist_ok=True)
         shutil.move(from_path, downloaded_files_dir / downloaded_file.file_name)
         await self._save_metadata(self._get_entity_dir(entity), entity)
+        self._entities_cache[entity.imdb_id] = entity
 
     def _get_entity_dir(self, entity: MediaEntity) -> Path:
         """Get the directory for an entity."""
