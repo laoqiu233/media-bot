@@ -1,6 +1,7 @@
 """System status screen."""
 
 import logging
+import shutil
 from pathlib import Path
 
 from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
@@ -38,6 +39,15 @@ class StatusScreen(Screen):
 
     def get_name(self) -> str:
         return "status"
+
+    @staticmethod
+    def _format_bytes(bytes_value: int) -> str:
+        """Format bytes into human-readable format."""
+        for unit in ["B", "KB", "MB", "GB", "TB"]:
+            if bytes_value < 1024.0:
+                return f"{bytes_value:.1f} {unit}"
+            bytes_value /= 1024.0
+        return f"{bytes_value:.1f} PB"
 
     async def render(self, context: Context) -> ScreenRenderResult:
         try:
@@ -97,6 +107,24 @@ class StatusScreen(Screen):
                 status_text += f"Completed: {len(completed_downloads)}\n"
             status_text += f"Films in library: {movies_count}\n"
             status_text += f"Series in library: {series_count}\n"
+
+            # Storage information
+            try:
+                # Get disk usage for the root filesystem
+                disk_usage = shutil.disk_usage("/")
+                total = self._format_bytes(disk_usage.total)
+                used = self._format_bytes(disk_usage.used)
+                free = self._format_bytes(disk_usage.free)
+                percent_used = (disk_usage.used / disk_usage.total) * 100
+
+                status_text += "\n💾 *Storage:*\n"
+                status_text += f"Total: {total}\n"
+                status_text += f"Used: {used} ({percent_used:.1f}%)\n"
+                status_text += f"Free: {free}\n"
+            except Exception as e:
+                logger.error(f"Error getting disk usage: {e}")
+                status_text += "\n💾 *Storage:*\n"
+                status_text += "❌ Unable to retrieve storage information\n"
 
             keyboard = [
                 [InlineKeyboardButton("⬅️ Back", callback_data=STATUS_BACK)],
