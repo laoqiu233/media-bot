@@ -861,7 +861,7 @@ class MPVController:
                 "--image-display-duration=inf",
                 "--loop-file=inf",
                 "--fs",
-                "--ontop",
+#                "--ontop",
                 "--no-border",
                 "--no-window-dragging",
                 "--no-input-default-bindings",
