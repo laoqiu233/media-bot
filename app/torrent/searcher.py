@@ -47,9 +47,9 @@ class RuTrackerTorrentSearchResult(TorrentSearchResult):
         if self.torrent_file_link is None:
             raise ValueError("Torrent file link is not set")
 
-        username = self.config.tracker.username or os.getenv("RUTRACKER_USERNAME")
-        password = self.config.tracker.password or os.getenv("RUTRACKER_PASSWORD")
-        proxy = self.config.tracker.proxy or os.getenv("RUTRACKER_PROXY")
+        username = self.config.tracker.username or os.getenv("TRACKER_USERNAME")
+        password = self.config.tracker.password or os.getenv("TRACKER_PASSWORD")
+        proxy = self.config.tracker.proxy or os.getenv("TRACKER_PROXY")
 
         if username is None or password is None:
             raise ValueError("RuTracker credentials are not set")
