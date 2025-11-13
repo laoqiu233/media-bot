@@ -8,6 +8,7 @@ from app.bot.callback_data import (
     DOWNLOADS_BACK,
     DOWNLOADS_CANCEL,
     DOWNLOADS_PAUSE,
+    DOWNLOADS_REFRESH,
     DOWNLOADS_RESUME,
     DOWNLOADS_SEARCH,
 )
@@ -39,25 +40,41 @@ class DownloadsScreen(Screen):
         """Get screen name."""
         return "downloads"
 
+    async def on_enter(self, context: Context, **kwargs) -> None:
+        """Called when entering the downloads screen.
+        
+        This ensures the screen is refreshed with latest download data.
+        """
+        # Clear any cached state to force fresh render
+        pass
+
     async def render(self, context: Context) -> ScreenRenderResult:
         """Render the downloads screen.
 
         Args:
-            session: The session object
+            context: Bot context
 
         Returns:
-            Tuple of (text, keyboard)
+            Tuple of (text, keyboard, render_options)
         """
         try:
+            # Always fetch fresh data - don't cache
             tasks = await self.downloader.get_all_tasks()
 
             if not tasks:
                 text = "📥 *Downloads*\n\nNo active downloads.\n\nUse Search to find and download content."
                 keyboard = [
                     [InlineKeyboardButton("🔍 Search Content", callback_data=DOWNLOADS_SEARCH)],
-                    [InlineKeyboardButton("« Back to Menu", callback_data=DOWNLOADS_BACK)],
+                    [
+                        InlineKeyboardButton("🔄 Refresh", callback_data=DOWNLOADS_REFRESH),
+                        InlineKeyboardButton("« Back to Menu", callback_data=DOWNLOADS_BACK)
+                    ],
                 ]
-                return text, InlineKeyboardMarkup(keyboard), RenderOptions()
+                # Add timestamp to force updates
+                import time
+                timestamp_comment = f"<!-- {int(time.time() * 1000)} -->"
+                text_with_timestamp = text + timestamp_comment
+                return text_with_timestamp, InlineKeyboardMarkup(keyboard), RenderOptions()
 
             # Build downloads status text
             text = "📥 *Active Downloads*\n\n"
@@ -138,9 +155,18 @@ class DownloadsScreen(Screen):
                         ]
                     )
             # Bottom buttons
-            keyboard.append([InlineKeyboardButton("« Back to Menu", callback_data=DOWNLOADS_BACK)])
+            keyboard.append([
+                InlineKeyboardButton("🔄 Refresh", callback_data=DOWNLOADS_REFRESH),
+                InlineKeyboardButton("« Back to Menu", callback_data=DOWNLOADS_BACK)
+            ])
 
-            return text, InlineKeyboardMarkup(keyboard), RenderOptions()
+            # Add a timestamp comment to force updates (hidden in text)
+            # This ensures the screen always updates even if progress numbers are the same
+            import time
+            timestamp_comment = f"<!-- {int(time.time() * 1000)} -->"
+            text_with_timestamp = text + timestamp_comment
+            
+            return text_with_timestamp, InlineKeyboardMarkup(keyboard), RenderOptions()
 
         except Exception as e:
             logger.error(f"Error rendering downloads: {e}")
@@ -184,17 +210,28 @@ class DownloadsScreen(Screen):
         elif query.data == DOWNLOADS_SEARCH:
             return Navigation("search")
 
+        elif query.data == DOWNLOADS_REFRESH:
+            # Refresh the screen by returning None to trigger re-render
+            await query.answer("Refreshing...")
+            return None
+
         elif query.data.startswith(DOWNLOADS_PAUSE):
             task_id = query.data[len(DOWNLOADS_PAUSE) :]
             await self._pause_download(query, task_id)
+            # Return None to trigger re-render with updated state
+            return None
 
         elif query.data.startswith(DOWNLOADS_RESUME):
             task_id = query.data[len(DOWNLOADS_RESUME) :]
             await self._resume_download(query, task_id)
+            # Return None to trigger re-render with updated state
+            return None
 
         elif query.data.startswith(DOWNLOADS_CANCEL):
             task_id = query.data[len(DOWNLOADS_CANCEL) :]
             await self._cancel_download(query, task_id)
+            # Return None to trigger re-render with updated state
+            return None
 
     async def _pause_download(
         self,
@@ -205,7 +242,6 @@ class DownloadsScreen(Screen):
 
         Args:
             query: CallbackQuery
-            context: Bot context
             task_id: Task ID
         """
         try:

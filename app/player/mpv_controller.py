@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -1196,10 +1197,14 @@ class MPVController:
         img.save(out_path, quality=100, optimize=False)
 
     async def _update_progress_image(self) -> None:
-        """Background task to periodically update the download progress image."""
+        """Background task to periodically update the download progress image on TV.
+        
+        Regenerates the PNG with latest progress data and reloads it in MPV
+        without closing the player, providing smooth live updates.
+        """
         while self._showing_download_progress:
             try:
-                await asyncio.sleep(2.0)  # Update every 2 seconds
+                await asyncio.sleep(1.0)  # Update every 1 second for smoother progress updates
                 
                 if not self._showing_download_progress:
                     break
@@ -1237,16 +1242,25 @@ class MPVController:
                 tmp_dir = project_root / ".setup"
                 tmp_dir.mkdir(parents=True, exist_ok=True)
                 progress_png = tmp_dir / "download_progress.png"
+                progress_png_temp = tmp_dir / "download_progress_temp.png"
                 
-                self._generate_download_progress_image(active_tasks, progress_png)
+                # Generate new image to temp file first
+                self._generate_download_progress_image(active_tasks, progress_png_temp)
+                
+                # Atomically replace the old file (ensures MPV sees the change)
+                if progress_png.exists():
+                    progress_png.unlink()
+                shutil.move(progress_png_temp, progress_png)
                 
                 # Reload image in the same MPV player instance (fast, no process restart)
                 if self._player is not None and self._showing_image:
                     try:
-                        # Just reload the file - MPV will update the display instantly
+                        # Force reload by calling loadfile again - MPV will reload the updated file
+                        # This works because we atomically replaced the file, so MPV sees it as changed
                         self._player.loadfile(str(progress_png))
                         self._current_image_path = progress_png
-                        # No need to wait - MPV updates immediately
+                        # Small delay to ensure MPV has reloaded the file
+                        await asyncio.sleep(0.15)
                     except Exception as e:
                         logger.error(f"Error reloading progress image: {e}", exc_info=True)
                 

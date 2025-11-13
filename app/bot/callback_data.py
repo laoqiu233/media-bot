@@ -21,6 +21,7 @@ DOWNLOADS_SEARCH = "downloads:search:"
 DOWNLOADS_PAUSE = "downloads:pause:"  # Followed by task_id
 DOWNLOADS_RESUME = "downloads:resume:"  # Followed by task_id
 DOWNLOADS_CANCEL = "downloads:cancel:"  # Followed by task_id
+DOWNLOADS_REFRESH = "downloads:refresh:"
 
 # Library screen callbacks
 LIBRARY_BACK = "library:back:"
