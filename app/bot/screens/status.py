@@ -49,11 +49,15 @@ class StatusScreen(Screen):
             # Player status
             status_text += "🎮 *Player:*\n"
             if player_status["is_playing"]:
-                filename = Path(player_status["current_file"]).name if player_status.get("current_file") else "Unknown"
+                filename = (
+                    Path(player_status["current_file"]).name
+                    if player_status.get("current_file")
+                    else "Unknown"
+                )
                 status_text += f"▶️ Playing: {filename}\n"
             else:
                 status_text += "⏹ Idle\n"
-            
+
             # Player volume
             volume = player_status.get("volume")
             if volume is not None:
@@ -78,11 +82,11 @@ class StatusScreen(Screen):
             active_downloads = [t for t in tasks if t.status in active_statuses]
             completed_downloads = [t for t in tasks if t.status == "completed"]
             paused_downloads = [t for t in tasks if t.status == "paused"]
-            
+
             # Get library count
             movies = await self.library_manager.get_all_movies()
             movies_count = len(movies)
-            
+
             status_text += f"\n📥 *Downloads:*\n"
             status_text += f"Active: {len(active_downloads)}\n"
             if paused_downloads:

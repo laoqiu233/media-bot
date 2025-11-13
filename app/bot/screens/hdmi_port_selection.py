@@ -23,7 +23,9 @@ logger = logging.getLogger(__name__)
 class HDMIConnector:
     """Represents an HDMI connector detected by modetest."""
 
-    def __init__(self, connector_id: int, name: str, connected: bool, modes: list[str] | None = None):
+    def __init__(
+        self, connector_id: int, name: str, connected: bool, modes: list[str] | None = None
+    ):
         """Initialize HDMI connector.
 
         Args:
@@ -164,7 +166,7 @@ async def _get_connector_modes(connector_id: int) -> list[str]:
                 timeout=10,
             ),
         )
-        
+
         # Fallback if vc4 fails
         if result.returncode != 0:
             result = await loop.run_in_executor(
@@ -220,7 +222,10 @@ async def _set_hdmi_port(connector_id: int, connector_name: str) -> tuple[bool, 
             return False, f"Connector {connector_name} (ID: {connector_id}) not found"
 
         if not connector.connected:
-            return False, f"Connector {connector_name} is not connected. Please connect a display first."
+            return (
+                False,
+                f"Connector {connector_name} is not connected. Please connect a display first.",
+            )
 
         # Get available CRTCs (display controllers)
         crtc_result = await loop.run_in_executor(
@@ -233,7 +238,7 @@ async def _set_hdmi_port(connector_id: int, connector_name: str) -> tuple[bool, 
                 timeout=10,
             ),
         )
-        
+
         # Fallback if vc4 fails
         if crtc_result.returncode != 0:
             crtc_result = await loop.run_in_executor(
@@ -305,7 +310,7 @@ async def _set_hdmi_port(connector_id: int, connector_name: str) -> tuple[bool, 
                     timeout=10,
                 ),
             )
-            
+
             # Fallback without -M vc4
             if set_result2.returncode != 0:
                 set_result2 = await loop.run_in_executor(
@@ -322,7 +327,9 @@ async def _set_hdmi_port(connector_id: int, connector_name: str) -> tuple[bool, 
             if set_result2.returncode == 0:
                 return True, f"Successfully switched to {connector_name} (mode: {mode})"
             else:
-                error_msg = set_result2.stderr or set_result2.stdout or set_result.stderr or "Unknown error"
+                error_msg = (
+                    set_result2.stderr or set_result2.stdout or set_result.stderr or "Unknown error"
+                )
                 return False, f"Failed to switch HDMI port: {error_msg.strip()}"
 
     except Exception as e:

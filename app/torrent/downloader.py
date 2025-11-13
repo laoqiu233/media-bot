@@ -9,16 +9,18 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from py_rutracker import AsyncRuTrackerClient
+
 try:
     import libtorrent as lt
 except ImportError:
     lt = None
 
-from enum import Enum
-
 from app.config import Config
 from app.library.models import MatchedTorrentFiles
 from app.torrent.searcher import TorrentSearchResult
+
+from enum import Enum
 
 logger = logging.getLogger(__name__)
 
@@ -138,34 +140,6 @@ class TorrentDownloader:
                 params = lt.parse_magnet_uri(torrent.magnet_link)
                 params.save_path = str(self.download_path)
             else:
-<<<<<<< HEAD
-                try:
-                    file_name = f"{torrent_file_link[-7:]}.torrent"
-                    file_path = self.download_path.joinpath('torrents', file_name)
-                    # Check environment variables directly in case credentials were updated
-                    import os
-                    username = self.config.tracker.username or os.getenv("TRACKER_USERNAME")
-                    password = self.config.tracker.password or os.getenv("TRACKER_PASSWORD")
-                    proxy = self.config.tracker.proxy or os.getenv("TRACKER_PROXY")
-                    
-                    if not username or not password:
-                        logger.error("RuTracker credentials not configured. Please set TRACKER_USERNAME and TRACKER_PASSWORD.")
-                        raise ValueError("RuTracker credentials not configured")
-                    
-                    async with AsyncRuTrackerClient(username, password, proxy) as client:
-                        bytes = await client.download(torrent_file_link)
-                        with open(file_path, mode='wb') as file:
-                            file.write(bytes)
-                    params = {
-                        'save_path': str(self.download_path),
-                        'ti': lt.torrent_info(str(file_path))
-                    }
-                    handle = self.session.add_torrent(params)
-                except Exception as e:
-                    logger.error(f"Error downloading from torrent file link: {e}")
-                    raise
-                        
-=======
                 torrent_file_path = await torrent.fetch_torrent_file()
                 # Parse torrent info to set file priorities
                 torrent_info = lt.torrent_info(str(torrent_file_path))
@@ -176,7 +150,6 @@ class TorrentDownloader:
             params["file_priorities"] = file_priorities
             handle = self.session.add_torrent(params)
 
->>>>>>> 08bf1eb (Added series downloading)
             # Store download state
             self.downloads[task_id] = DownloadState(
                 task_id=task_id,

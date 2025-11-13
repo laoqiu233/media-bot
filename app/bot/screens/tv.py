@@ -59,7 +59,7 @@ class TVScreen(Screen):
 
                 if cec_status.get("tv_name"):
                     text += f"Device: {cec_status['tv_name']}\n"
-                
+
                 # Show current running command if any
                 # current_cmd = cec_status.get("current_command")
                 # if current_cmd:

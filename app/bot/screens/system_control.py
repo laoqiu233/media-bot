@@ -82,4 +82,3 @@ class SystemControlScreen(Screen):
             return Navigation(next_screen="main_menu")
 
         return None
-

@@ -49,7 +49,9 @@ class AudioTrackSelectionScreen(Screen):
                 text += "⚠️ No media is currently playing.\n\n"
                 text += "Please start playing a media file first."
 
-                keyboard = [[InlineKeyboardButton("⬅️ Back to Player", callback_data=AUDIO_TRACK_BACK)]]
+                keyboard = [
+                    [InlineKeyboardButton("⬅️ Back to Player", callback_data=AUDIO_TRACK_BACK)]
+                ]
                 return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
             # Get available audio tracks
@@ -62,7 +64,9 @@ class AudioTrackSelectionScreen(Screen):
                 text += "⚠️ No audio tracks found in the current media.\n\n"
                 text += "This media file may not have multiple audio tracks."
 
-                keyboard = [[InlineKeyboardButton("⬅️ Back to Player", callback_data=AUDIO_TRACK_BACK)]]
+                keyboard = [
+                    [InlineKeyboardButton("⬅️ Back to Player", callback_data=AUDIO_TRACK_BACK)]
+                ]
                 return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
             # Show current track
@@ -82,22 +86,26 @@ class AudioTrackSelectionScreen(Screen):
             for track in audio_tracks:
                 track_id = track["id"]
                 track_label = self._format_track_label(track)
-                
+
                 # Mark current track
                 if current_track_id == track_id:
                     button_text = f"✅ {track_label}"
                 else:
                     button_text = track_label
 
-                keyboard.append([
-                    InlineKeyboardButton(
-                        button_text,
-                        callback_data=f"{AUDIO_TRACK_SELECT}{track_id}",
-                    )
-                ])
+                keyboard.append(
+                    [
+                        InlineKeyboardButton(
+                            button_text,
+                            callback_data=f"{AUDIO_TRACK_SELECT}{track_id}",
+                        )
+                    ]
+                )
 
             # Add back button
-            keyboard.append([InlineKeyboardButton("⬅️ Back to Player", callback_data=AUDIO_TRACK_BACK)])
+            keyboard.append(
+                [InlineKeyboardButton("⬅️ Back to Player", callback_data=AUDIO_TRACK_BACK)]
+            )
 
             return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
@@ -119,7 +127,7 @@ class AudioTrackSelectionScreen(Screen):
             Formatted track label
         """
         parts = []
-        
+
         # Add track number
         parts.append(f"Track {track['id']}")
 
@@ -189,4 +197,3 @@ class AudioTrackSelectionScreen(Screen):
             logger.error(f"Error handling audio track selection callback: {e}", exc_info=True)
             await query.answer("Error", show_alert=True)
             return None
-

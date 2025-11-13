@@ -110,7 +110,7 @@ class MPVController:
                 self._is_playing = False
                 self._current_file = None
                 self._trigger_event("playback_finished", event)
-                
+
                 # Resume all downloads when playback ends
                 async def resume_downloads_and_show_loading():
                     # Resume downloads first
@@ -118,14 +118,16 @@ class MPVController:
                         try:
                             resumed_count = await self._downloader.resume_all_downloads()
                             if resumed_count > 0:
-                                logger.info(f"Resumed {resumed_count} downloads after playback ended")
+                                logger.info(
+                                    f"Resumed {resumed_count} downloads after playback ended"
+                                )
                         except Exception as e:
                             logger.error(f"Error resuming downloads after playback: {e}")
-                    
+
                     # Wait 1.5 seconds for video to fully stop before showing loading.gif
                     await asyncio.sleep(1.5)
                     await self._show_loading_gif()
-                
+
                 # Schedule task on main event loop from MPV's callback thread
                 loop = self._event_loop
                 if loop and loop.is_running():
@@ -136,7 +138,9 @@ class MPVController:
                     # Store future to prevent garbage collection
                     # Note: We don't need to await it, it's fire-and-forget
                 else:
-                    logger.warning("Event loop not available for resuming downloads and showing loading gif")
+                    logger.warning(
+                        "Event loop not available for resuming downloads and showing loading gif"
+                    )
 
             @self._player.event_callback("file-loaded")
             def file_loaded_callback(event):
@@ -147,7 +151,7 @@ class MPVController:
                 if loop and loop.is_running():
                     # Use run_coroutine_threadsafe to schedule from MPV's callback thread
                     asyncio.run_coroutine_threadsafe(self._hide_loading_gif(), loop)
-            
+
             @self._player.event_callback("playback-restart")
             def playback_restart_callback(event):
                 """Called when playback actually starts/restarts."""
@@ -159,11 +163,12 @@ class MPVController:
                     asyncio.run_coroutine_threadsafe(self._hide_loading_gif(), loop)
 
             logger.info("MPV player initialized successfully")
-            
+
             # Show loading.gif when player is idle (no media playing)
             # This will only run if init_flow has finished (no SETUP_ACTIVE env var)
             # Check if setup is active to avoid conflicts with init_flow's loading.gif
             import os
+
             if not os.getenv("MEDIA_BOT_SETUP_ACTIVE"):
                 # Setup is complete, show loading.gif if no media is playing
                 if not self._is_playing:
@@ -183,7 +188,7 @@ class MPVController:
             except Exception:
                 pass
             self._loading_proc = None
-        
+
         if self._player:
             try:
                 self._player.terminate()
@@ -241,11 +246,11 @@ class MPVController:
                 max_wait = 2.0  # Maximum wait time
                 waited = 0.0
                 video_loaded = False
-                
+
                 while waited < max_wait:
                     await asyncio.sleep(0.1)
                     waited += 0.1
-                    
+
                     # Check if video is actually playing/loaded
                     try:
                         if self._player.time_pos is not None or self._player.duration is not None:
@@ -253,16 +258,20 @@ class MPVController:
                             break
                     except Exception:
                         pass
-                
+
                 # Only stop loading.gif AFTER video is confirmed loaded and visible
                 # Wait 1.5 seconds to ensure video is fully rendered and visible before stopping GIF
                 if video_loaded:
-                    logger.info("Video loaded and visible - waiting 1.5s before stopping loading.gif")
+                    logger.info(
+                        "Video loaded and visible - waiting 1.5s before stopping loading.gif"
+                    )
                     await asyncio.sleep(1.5)
                     await self._hide_loading_gif()
                 else:
                     # Fallback: if we can't detect, wait a bit more then stop anyway
-                    logger.warning("Could not confirm video load, waiting 1.5s then stopping loading.gif anyway")
+                    logger.warning(
+                        "Could not confirm video load, waiting 1.5s then stopping loading.gif anyway"
+                    )
                     await asyncio.sleep(1.5)
                     await self._hide_loading_gif()
 
@@ -303,7 +312,7 @@ class MPVController:
         try:
             self._player.pause = True
             self._is_playing = False
-            
+
             # Ensure downloads are paused when video is paused
             # This handles cases where downloads might have started/resumed after play()
             if self._downloader is not None:
@@ -313,7 +322,7 @@ class MPVController:
                         logger.info(f"Paused {paused_count} downloads when video was paused")
                 except Exception as e:
                     logger.error(f"Error pausing downloads when video paused: {e}")
-            
+
             logger.info("Playback paused")
             return True
         except Exception as e:
@@ -354,7 +363,7 @@ class MPVController:
             self._player.stop()
             self._is_playing = False
             self._current_file = None
-            
+
             # Resume all downloads when playback is stopped manually
             if self._downloader is not None:
                 try:
@@ -363,7 +372,7 @@ class MPVController:
                         logger.info(f"Resumed {resumed_count} downloads after stop command")
                 except Exception as e:
                     logger.error(f"Error resuming downloads after stop: {e}")
-            
+
             logger.info("Playback stopped")
             return True
         except Exception as e:
@@ -398,7 +407,7 @@ class MPVController:
                 curr = await self.get_position()
                 res = curr + seconds
                 self._player.seek(res, "absolute")
-                self._player.seek(res, "absolute") # evil double seek to screw with the haters
+                self._player.seek(res, "absolute")  # evil double seek to screw with the haters
             else:
                 self._player.seek(seconds, "absolute")
             logger.info(f"Seeked {'relative' if relative else 'absolute'}: {seconds}s")
@@ -553,13 +562,15 @@ class MPVController:
             audio_tracks = []
             for track in track_list:
                 if track.get("type") == "audio":
-                    audio_tracks.append({
-                        "id": track.get("id"),
-                        "title": track.get("title", ""),
-                        "lang": track.get("lang", ""),
-                        "codec": track.get("codec", ""),
-                        "selected": track.get("selected", False),
-                    })
+                    audio_tracks.append(
+                        {
+                            "id": track.get("id"),
+                            "title": track.get("title", ""),
+                            "lang": track.get("lang", ""),
+                            "codec": track.get("codec", ""),
+                            "selected": track.get("selected", False),
+                        }
+                    )
 
             return audio_tracks
         except Exception as e:
@@ -722,15 +733,17 @@ class MPVController:
             else:
                 # Process died, clear it
                 self._loading_proc = None
-        
+
         # Check if init_flow left a loading.gif process running
         import os
+
         loading_pid_str = os.environ.get("MEDIA_BOT_LOADING_PID")
         if loading_pid_str:
             try:
                 loading_pid = int(loading_pid_str)
                 # Check if process is still running using a simple method
                 import subprocess
+
                 try:
                     # Use kill -0 to check if process exists (doesn't actually kill it)
                     result = subprocess.run(
@@ -753,19 +766,19 @@ class MPVController:
             except ValueError:
                 # Invalid PID
                 os.environ.pop("MEDIA_BOT_LOADING_PID", None)
-        
+
         try:
             import subprocess
             from pathlib import Path
-            
+
             # Find project root (assuming this file is in app/player/)
             project_root = Path(__file__).resolve().parents[2]
             loading_path = project_root / "loading3.gif"
-            
+
             if not loading_path.exists():
                 logger.debug("loading3.gif not found, skipping display")
                 return
-            
+
             # Display loading3.gif with mpv (similar to QR code display)
             cmd = [
                 "mpv",
@@ -798,7 +811,7 @@ class MPVController:
 
     async def _hide_loading_gif(self) -> None:
         """Hide loading3.gif when media starts playing.
-        
+
         Actually terminate the loading3.gif process to avoid running 2 MPV instances
         on Raspberry Pi, which causes performance issues.
         """
@@ -806,6 +819,7 @@ class MPVController:
         if self._loading_proc_pid is not None:
             try:
                 import subprocess
+
                 # Wait a tiny bit to ensure video is actually visible
                 await asyncio.sleep(0.2)
                 # Kill the process by PID
@@ -814,34 +828,34 @@ class MPVController:
                     capture_output=True,
                     timeout=1.0,
                 )
-                logger.info(f"Terminated loading3.gif (PID {self._loading_proc_pid}) - video is now playing")
+                logger.info(
+                    f"Terminated loading3.gif (PID {self._loading_proc_pid}) - video is now playing"
+                )
                 self._loading_proc_pid = None
             except Exception as e:
                 logger.debug(f"Error terminating loading3.gif by PID: {e}")
                 self._loading_proc_pid = None
-        
+
         if self._loading_proc is None:
             return
-        
+
         try:
             # Wait a tiny bit to ensure video is actually visible
             await asyncio.sleep(0.2)
-            
+
             # Terminate the loading.gif process
             if self._loading_proc.poll() is None:  # Still running
                 self._loading_proc.terminate()
                 try:
                     # Wait up to 1 second for graceful termination
-                    await asyncio.wait_for(
-                        asyncio.to_thread(self._loading_proc.wait), timeout=1.0
-                    )
+                    await asyncio.wait_for(asyncio.to_thread(self._loading_proc.wait), timeout=1.0)
                 except asyncio.TimeoutError:
                     # Force kill if it doesn't terminate
                     self._loading_proc.kill()
                     await asyncio.to_thread(self._loading_proc.wait)
-                
+
                 logger.info("Terminated loading3.gif - video is now playing")
-            
+
             self._loading_proc = None
         except Exception as e:
             logger.debug(f"Error terminating loading3.gif: {e}")

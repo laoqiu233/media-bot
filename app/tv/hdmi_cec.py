@@ -27,7 +27,9 @@ class CECController:
         self._current_command: Optional[str] = None  # Track current running command
         self._status_cache: Optional[dict] = None  # Cached status
         self._status_cache_time: float = 0.0  # Timestamp of cached status
-        self._status_cache_ttl: float = 10.0  # Cache TTL in seconds (10 seconds for faster power status updates)
+        self._status_cache_ttl: float = (
+            10.0  # Cache TTL in seconds (10 seconds for faster power status updates)
+        )
 
     async def check_availability(self) -> bool:
         """Check if CEC is available on the system.
@@ -117,10 +119,10 @@ class CECController:
                 logger.error(f"Error sending CEC command: {e}")
                 self._current_command = None
                 return False, str(e)
-    
+
     def get_current_command(self) -> Optional[str]:
         """Get the currently running CEC command.
-        
+
         Returns:
             Current command string or None if no command is running
         """
@@ -175,14 +177,18 @@ class CECController:
                 if phys_match:
                     phys_addr = phys_match.group(1).strip()
                     logger.info(f"Using physical address: {phys_addr}")
-                    success, _ = await self._send_cec_command(["--to", "0", "--active-source", f"phys-addr={phys_addr}"])
+                    success, _ = await self._send_cec_command(
+                        ["--to", "0", "--active-source", f"phys-addr={phys_addr}"]
+                    )
                     return success
         except Exception as e:
             logger.debug(f"Could not get physical address: {e}")
-        
+
         # Fallback to common default physical address
         logger.info("Using default physical address: 1.0.0.0")
-        success, output = await self._send_cec_command(["--to", "0", "--active-source", "phys-addr=1.0.0.0"])
+        success, output = await self._send_cec_command(
+            ["--to", "0", "--active-source", "phys-addr=1.0.0.0"]
+        )
         return success
 
     async def get_power_status(self) -> str | None:
@@ -221,7 +227,9 @@ class CECController:
                 # Check if command succeeded
                 if process.returncode != 0:
                     error = stderr.decode() if stderr else "Unknown error"
-                    logger.debug(f"Power status query failed with return code {process.returncode}: {error}")
+                    logger.debug(
+                        f"Power status query failed with return code {process.returncode}: {error}"
+                    )
                     self._current_command = None
                     return None
 
@@ -234,7 +242,7 @@ class CECController:
 
                 # Check output for power state patterns using regex for exact matching
                 output_lower = output.lower().strip()
-                
+
                 # Use regex to find "pwr-state: on" pattern (very strict matching)
                 # Match "pwr-state:" (with optional dash variations) followed by optional whitespace and "on" as a whole word
                 # Also handle variations like "power-state" or "pwr state"
@@ -243,27 +251,27 @@ class CECController:
                     r"power-state:\s*on\b",  # Alternative format
                     r"pwr\s+state:\s*on\b",  # Space instead of dash
                 ]
-                
+
                 standby_patterns = [
                     r"pwr-state:\s*(standby|off)\b",  # Standard format
                     r"power-state:\s*(standby|off)\b",  # Alternative format
                     r"pwr\s+state:\s*(standby|off)\b",  # Space instead of dash
                 ]
-                
+
                 # Check for "on" status first
                 for pattern in on_patterns:
                     match = re.search(pattern, output_lower)
                     if match:
                         logger.debug(f"TV power status: on (found pattern: {pattern})")
                         return "on"
-                
+
                 # Check for "standby" or "off" status
                 for pattern in standby_patterns:
                     match = re.search(pattern, output_lower)
                     if match:
                         logger.debug(f"TV power status: standby (found pattern: {pattern})")
                         return "standby"
-                
+
                 # If we got a response but no clear power state, return None
                 if output_lower:
                     logger.warning(f"Power status query returned unexpected output: {repr(output)}")
@@ -313,7 +321,9 @@ class CECController:
         # Send volume up command 5 times
         success = True
         for _ in range(5):
-            result, _ = await self._send_cec_command(["--to", "0", "--user-control-pressed", "ui-cmd=volume-up"])
+            result, _ = await self._send_cec_command(
+                ["--to", "0", "--user-control-pressed", "ui-cmd=volume-up"]
+            )
             if not result:
                 success = False
             # Small delay between commands to avoid overwhelming the TV
@@ -330,7 +340,9 @@ class CECController:
         # Send volume down command 5 times
         success = True
         for _ in range(5):
-            result, _ = await self._send_cec_command(["--to", "0", "--user-control-pressed", "ui-cmd=volume-down"])
+            result, _ = await self._send_cec_command(
+                ["--to", "0", "--user-control-pressed", "ui-cmd=volume-down"]
+            )
             if not result:
                 success = False
             # Small delay between commands to avoid overwhelming the TV
@@ -344,7 +356,9 @@ class CECController:
             True if successful
         """
         logger.info("Muting TV")
-        success, _ = await self._send_cec_command(["--to", "0", "--user-control-pressed", "ui-cmd=mute"])
+        success, _ = await self._send_cec_command(
+            ["--to", "0", "--user-control-pressed", "ui-cmd=mute"]
+        )
         return success
 
     async def get_osd_name(self) -> str | None:
@@ -367,7 +381,7 @@ class CECController:
             name = match.group(1).strip()
             logger.info(f"TV OSD name: {name}")
             return name
-        
+
         # Try alternative format
         match = re.search(r"device\s+#?0:\s*(.+)", output, re.IGNORECASE)
         if match:
@@ -413,14 +427,14 @@ class CECController:
 
     async def get_status(self) -> dict:
         """Get overall CEC status.
-        
+
         Uses caching to avoid frequent cec-ctl calls. Cache expires after 60 seconds.
 
         Returns:
             Status dictionary
         """
         current_time = time.time()
-        
+
         # Return cached status if it's still valid
         if (
             self._status_cache is not None
@@ -430,7 +444,7 @@ class CECController:
             if self._status_cache:
                 self._status_cache["current_command"] = self.get_current_command()
             return self._status_cache
-        
+
         # Cache expired or doesn't exist, fetch fresh status
         available = await self.check_availability()
         if not available:
@@ -456,11 +470,11 @@ class CECController:
             "tv_name": osd_name,
             "current_command": self.get_current_command(),
         }
-        
+
         # Cache the result
         self._status_cache = status
         self._status_cache_time = current_time
-        
+
         return status
 
 

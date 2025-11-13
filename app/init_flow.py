@@ -169,14 +169,16 @@ async def _start_web_server(
                         ssid = parts[0]
                         if ssid and ssid != "--" and ssid not in seen_ssids:
                             seen_ssids.add(ssid)
-                            signal = (parts[1] if len(parts) > 1 else "0")
-                            security = (parts[2] if len(parts) > 2 else "")
-                            networks.append({
-                                "ssid": ssid,
-                                "signal": signal,
-                                "security": security,
-                            })
-                
+                            signal = parts[1] if len(parts) > 1 else "0"
+                            security = parts[2] if len(parts) > 2 else ""
+                            networks.append(
+                                {
+                                    "ssid": ssid,
+                                    "signal": signal,
+                                    "security": security,
+                                }
+                            )
+
                 # Sort by signal strength (descending)
                 networks.sort(key=lambda x: int(x.get("signal", 0)), reverse=True)
         except Exception as e:
@@ -191,16 +193,15 @@ async def _start_web_server(
         html_content = _render_template("setup_success.html")
         return web.Response(text=html_content, content_type="text/html")
 
-
     async def handle_submit(request: web.Request) -> web.Response:
         data = await request.post()
-        token = (data.get("token") or "")
-        wifi_ssid = (data.get("wifi_ssid") or "")
-        wifi_password = (data.get("wifi_password") or "")
-        
+        token = data.get("token") or ""
+        wifi_ssid = data.get("wifi_ssid") or ""
+        wifi_password = data.get("wifi_password") or ""
+
         # Validate input (after stripping)
-        if wifi_ssid == '' or wifi_password == '' or token == '':
-            error_html = "<div class=\"error\">All fields are required.</div>"
+        if wifi_ssid == "" or wifi_password == "" or token == "":
+            error_html = '<div class="error">All fields are required.</div>'
             html_content = _render_template(
                 "setup.html",
                 ERROR_BOX=error_html,
@@ -253,14 +254,11 @@ async def _start_web_server(
         """Serve loading.gif from project root for HTML templates."""
         loading_path = _project_root() / "loading.gif"
         if loading_path.exists():
-            return web.Response(
-                body=loading_path.read_bytes(),
-                content_type="image/gif"
-            )
+            return web.Response(body=loading_path.read_bytes(), content_type="image/gif")
         else:
             # Return 404 if file doesn't exist
             return web.Response(status=404)
-    
+
     app = web.Application(middlewares=[log_requests])
     app.router.add_get("/", handle_index)
     app.router.add_post("/ap-continue", handle_ap_continue)
@@ -304,9 +302,7 @@ def _detect_screen_resolution() -> tuple[int, int]:
     """Detect screen resolution, defaulting to 1920x1080 if detection fails."""
     try:
         # Try xrandr first (Linux/X11)
-        result = subprocess.run(
-            ["xrandr"], capture_output=True, text=True, timeout=2
-        )
+        result = subprocess.run(["xrandr"], capture_output=True, text=True, timeout=2)
         if result.returncode == 0:
             for line in result.stdout.splitlines():
                 if " connected " in line and "x" in line:
@@ -322,19 +318,19 @@ def _detect_screen_resolution() -> tuple[int, int]:
                                 continue
     except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
         pass
-    
+
     # Default to 1920x1080 (common TV resolution)
     return 1920, 1080
 
 
 def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_path: Path) -> None:
     """Create a stunningly beautiful composite image with two QRs optimized for different display sizes.
-    
+
     Automatically adapts to screen resolution for optimal display on TV and other screens.
     """
     # Detect screen resolution for responsive design
     screen_width, screen_height = _detect_screen_resolution()
-    
+
     # Generate QR codes with high error correction for mobile scanning
     qr_factory = qrcode.QRCode(
         version=1,
@@ -355,16 +351,16 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     qr_factory.add_data(setup_url)
     qr_factory.make(fit=True)
     url_qr = qr_factory.make_image(fill_color="black", back_color="white").convert("RGB")
-    
+
     # Responsive sizing based on screen resolution
     # Use screen width as base, but ensure QR codes are large enough for scanning
     base_size = min(screen_width, screen_height) * 0.25  # 25% of smaller dimension
     qr_size = max(int(base_size), 400)  # Minimum 400px for scanning, scales up for TV
-    
+
     # Scale QR codes
     url_qr = url_qr.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
     wifi_qr = wifi_qr.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
-    
+
     # Responsive spacing and layout (scale with screen size)
     scale_factor = min(screen_width / 1920, screen_height / 1080, 1.5)  # Cap at 1.5x
     padding = int(60 * scale_factor)
@@ -375,25 +371,27 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     qr_spacing = int(60 * scale_factor)
     card_border = int(20 * scale_factor)
     shadow_offset = int(12 * scale_factor)
-    
+
     # Calculate layout - use full screen width/height
     width = screen_width
     height = screen_height
-    
+
     # Center content vertically and horizontally
     content_width = padding * 2 + qr_size * 2 + qr_spacing
-    content_height = padding * 2 + title_height + qr_size + label_height + text_height + section_padding
-    
+    content_height = (
+        padding * 2 + title_height + qr_size + label_height + text_height + section_padding
+    )
+
     # If content is smaller than screen, center it
     offset_x = (width - content_width) // 2 if content_width < width else 0
     offset_y = (height - content_height) // 2 if content_height < height else 0
-    
+
     # Create base image with form-style dark gradient background (FAST gradient approach)
     # Match the form's radial gradient: #1e293b -> #0f172a -> #020617
     # Use linear gradient approach instead of circles for much better performance
     img = Image.new("RGB", (width, height), color=(2, 6, 23))  # #020617
     draw = ImageDraw.Draw(img)
-    
+
     # Fast linear gradient from top to bottom (matching form's radial gradient effect)
     # Colors: #1e293b (30, 41, 59) at top -> #0f172a (15, 23, 42) at middle -> #020617 (2, 6, 23) at bottom
     step = max(4, height // 200)  # Much larger step for performance
@@ -409,72 +407,82 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
             r = int(15 - (15 - 2) * local_ratio)
             g = int(23 - (23 - 6) * local_ratio)
             b = int(42 - (42 - 23) * local_ratio)
-        
+
         draw.rectangle([(0, y), (width, min(y + step, height))], fill=(r, g, b))
-    
+
     # Subtle diagonal gradient accent (matching form's button gradient style)
     # Light green to cyan gradient: #16a34a -> #22d3ee (135deg like form buttons)
     # Apply as a subtle overlay in center area
     accent_overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     accent_draw = ImageDraw.Draw(accent_overlay)
-    
+
     # Create diagonal gradient effect (top-left to bottom-right, 135deg)
     center_x, center_y = width // 2, height // 2
     gradient_size = min(width, height) // 2
-    
+
     for i in range(gradient_size, 0, -max(4, gradient_size // 50)):
         # Distance from center
         dist_ratio = i / gradient_size if gradient_size > 0 else 0
         alpha = int(12 * (1 - dist_ratio) ** 2)  # Subtle accent
-        
+
         if alpha > 0:
             # Diagonal gradient colors (green to cyan)
             color_ratio = 1 - dist_ratio
             r = int(22 + (16 - 22) * color_ratio)  # 16a34a to 22d3ee
             g = int(211 + (163 - 211) * color_ratio)
             b = int(238 + (74 - 238) * color_ratio)
-            
+
             # Draw diagonal gradient rectangle
             size = gradient_size - i
             accent_draw.rectangle(
                 [center_x - size, center_y - size, center_x + size, center_y + size],
-                fill=(r, g, b, alpha)
+                fill=(r, g, b, alpha),
             )
-    
+
     img = Image.alpha_composite(img.convert("RGBA"), accent_overlay).convert("RGB")
     draw = ImageDraw.Draw(img)
-    
+
     # Load fonts with responsive sizing
     font_size_title = int(44 * scale_factor)
     font_size_label = int(30 * scale_factor)
     font_size_text = int(24 * scale_factor)
-    
+
     try:
         font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", font_size_title)
         font_label = ImageFont.truetype("DejaVuSans-Bold.ttf", font_size_label)
         font_text = ImageFont.truetype("DejaVuSans.ttf", font_size_text)
     except Exception:
         try:
-            font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size_title)
-            font_label = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size_label)
-            font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size_text)
+            font_title = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size_title
+            )
+            font_label = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size_label
+            )
+            font_text = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size_text
+            )
         except Exception:
             font_title = ImageFont.load_default()
             font_label = ImageFont.load_default()
             font_text = ImageFont.load_default()
-    
+
     # Title with form-style button gradient colors (light green to cyan)
     title_text = "Media Bot Setup"
     title_bbox = draw.textbbox((0, 0), title_text, font=font_title)
     title_width = title_bbox[2] - title_bbox[0]
-    title_x = offset_x + (content_width - title_width) // 2 if content_width < width else (width - title_width) // 2
+    title_x = (
+        offset_x + (content_width - title_width) // 2
+        if content_width < width
+        else (width - title_width) // 2
+    )
     title_y = offset_y + padding
-    
+
     # Create title with gradient effect (matching form button: #16a34a -> #22d3ee)
     # Use simplified glow for performance
     title_glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     title_glow_draw = ImageDraw.Draw(title_glow)
-    
+
     # Simplified glow (fewer layers for performance)
     for offset in range(4, 0, -1):
         alpha = int(20 * (1 - offset / 4))
@@ -505,17 +513,17 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     wifi_label_bbox = draw.textbbox((0, 0), wifi_label, font=font_label)
     wifi_label_width = wifi_label_bbox[2] - wifi_label_bbox[0]
     wifi_label_x = offset_x + padding + (qr_size - wifi_label_width) // 2
-    
+
     url_label_bbox = draw.textbbox((0, 0), url_label, font=font_label)
     url_label_width = url_label_bbox[2] - url_label_bbox[0]
     url_label_x = offset_x + padding + qr_size + qr_spacing + (qr_size - url_label_width) // 2
-    
+
     label_y = offset_y + padding + title_height + 20
-    
+
     # Create label glow effects (matching form button gradient)
     label_glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     label_glow_draw = ImageDraw.Draw(label_glow)
-    
+
     # Simplified glow for performance
     for offset in range(2, 0, -1):
         alpha = int(15 * (1 - offset / 2))
@@ -546,20 +554,20 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     # Draw main labels with white color (matching form text style)
     draw.text((wifi_label_x, label_y), wifi_label, fill=(255, 255, 255), font=font_label)
     draw.text((url_label_x, label_y), url_label, fill=(255, 255, 255), font=font_label)
-    
+
     # Calculate QR code positions (with offset for centering)
     qr_y = offset_y + padding + title_height + label_height + 25
     wifi_qr_x = offset_x + padding
     url_qr_x = offset_x + padding + qr_size + qr_spacing
-    
+
     # Create card containers matching form style (rgba(15, 23, 42, 0.92) with backdrop blur effect)
     card_bg_color = (15, 23, 42)  # Matching form card background
     card_border_color = (148, 163, 184)  # Matching form border rgba(148, 163, 184, 0.25)
-    
+
     # Draw card backgrounds with form-style shadow
     shadow_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     shadow_draw = ImageDraw.Draw(shadow_layer)
-    
+
     # Form-style shadow (softer, more subtle)
     shadow_offset = int(8 * scale_factor)
     for offset in range(shadow_offset, 0, -2):
@@ -581,10 +589,10 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
                 qr_y + qr_size + card_border + offset,
             ]
             shadow_draw.rectangle(url_shadow_rect, fill=(0, 0, 0, alpha))
-    
+
     img = Image.alpha_composite(img.convert("RGBA"), shadow_layer).convert("RGB")
     draw = ImageDraw.Draw(img)
-    
+
     # Draw card backgrounds (matching form card style)
     wifi_card_rect = [
         wifi_qr_x - card_border,
@@ -598,7 +606,7 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
         url_qr_x + qr_size + card_border,
         qr_y + qr_size + card_border,
     ]
-    
+
     # Card background with slight transparency effect
     card_overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     card_draw = ImageDraw.Draw(card_overlay)
@@ -606,24 +614,34 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     card_draw.rectangle(url_card_rect, fill=(*card_bg_color, 235))
     img = Image.alpha_composite(img.convert("RGBA"), card_overlay).convert("RGB")
     draw = ImageDraw.Draw(img)
-    
+
     # Card borders (matching form border style)
     border_width = max(1, int(scale_factor))
     draw.rectangle(
-        [wifi_qr_x - card_border, qr_y - card_border,
-         wifi_qr_x + qr_size + card_border, qr_y + qr_size + card_border],
-        outline=card_border_color, width=border_width
+        [
+            wifi_qr_x - card_border,
+            qr_y - card_border,
+            wifi_qr_x + qr_size + card_border,
+            qr_y + qr_size + card_border,
+        ],
+        outline=card_border_color,
+        width=border_width,
     )
     draw.rectangle(
-        [url_qr_x - card_border, qr_y - card_border,
-         url_qr_x + qr_size + card_border, qr_y + qr_size + card_border],
-        outline=card_border_color, width=border_width
+        [
+            url_qr_x - card_border,
+            qr_y - card_border,
+            url_qr_x + qr_size + card_border,
+            qr_y + qr_size + card_border,
+        ],
+        outline=card_border_color,
+        width=border_width,
     )
 
     # Paste QR codes on white backgrounds
     img.paste(wifi_qr, (wifi_qr_x, qr_y))
     img.paste(url_qr, (url_qr_x, qr_y))
-        
+
     # Stunning text below QR codes with glow effects
     text_y = qr_y + qr_size + section_padding
     wifi_text = f"SSID: {ap_ssid}\nPassword: {ap_password}"
@@ -636,7 +654,7 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
     # Create text glow layer
     text_glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     text_glow_draw = ImageDraw.Draw(text_glow)
-    
+
     line_height = int(36 * scale_factor)
     for i, line in enumerate(wifi_text_lines):
         line_bbox = draw.textbbox((0, 0), line, font=font_text)
@@ -698,7 +716,7 @@ def _generate_composite_qr(setup_url: str, ap_ssid: str, ap_password: str, out_p
 
 async def _display_with_mpv(image_path: Path) -> subprocess.Popen:
     """Launch mpv to display the provided image fullscreen in a loop.
-    
+
     Returns the process. The caller should wait for the image to actually load
     before stopping any loading screens.
     """
@@ -757,11 +775,11 @@ def _append_or_replace_env_line(lines: list[str], key: str, value: str) -> list[
 
 def _remove_env_line(lines: list[str], key: str) -> list[str]:
     """Remove a line from .env file content that starts with key=.
-    
+
     Args:
         lines: List of lines from .env file
         key: The environment variable key to remove
-        
+
     Returns:
         New list of lines with the key removed
     """
@@ -774,7 +792,7 @@ def _remove_env_line(lines: list[str], key: str) -> list[str]:
 
 def remove_telegram_token_from_env() -> None:
     """Remove TELEGRAM_BOT_TOKEN from .env file.
-    
+
     This is useful when the bot token is in conflict (another instance is running).
     """
     env_path = _project_root() / ".env"
@@ -847,7 +865,9 @@ async def ensure_telegram_token(force: bool = False) -> None:
         )
 
         if connect_result.returncode != 0:
-            error = (connect_result.stderr if connect_result.stderr else "") or "Failed to connect to the provided Wi‑Fi network."
+            error = (
+                connect_result.stderr if connect_result.stderr else ""
+            ) or "Failed to connect to the provided Wi‑Fi network."
             print(f"[init] Wi‑Fi connect failed: {error}")
             # Make sure hotspot stays active so the user can retry
             print(
@@ -912,7 +932,14 @@ async def ensure_telegram_token(force: bool = False) -> None:
 
     async def run_flow():
         import os
-        nonlocal mpv_proc, mpv_failed, current_ap_ssid, current_ap_password, loading_proc, loading_path
+
+        nonlocal \
+            mpv_proc, \
+            mpv_failed, \
+            current_ap_ssid, \
+            current_ap_password, \
+            loading_proc, \
+            loading_path
         # Ensure hotspot is up BEFORE generating QR
         current_ap_ssid = os.getenv("SETUP_AP_SSID", "media-bot-setup")
         current_ap_password = os.getenv("SETUP_AP_PASSWORD", "mediabot1234")
@@ -964,7 +991,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
                 capture_output=True,
                 text=True,
             )
-            if result.returncode != 0:  
+            if result.returncode != 0:
                 error_msg = result.stderr or result.stdout or "Unknown error"
                 print(f"[init] FATAL: Failed to create hotspot: {error_msg}")
                 print("[init] Cannot continue without hotspot. Exiting application.")
@@ -1004,11 +1031,11 @@ async def ensure_telegram_token(force: bool = False) -> None:
             )
         setup_url = f"http://{ap_ip}:{bound_port}/"
         print(setup_url)
-        
+
         # Store setup server info
         os.environ["SETUP_SERVER_PORT"] = str(bound_port)
         os.environ["SETUP_SERVER_HOST"] = ap_ip
-        
+
         # Prepare QR image under project data dir
         project = _project_root()
         tmp_dir = project / ".setup"
@@ -1017,7 +1044,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
         # Generate dual QR (Wi‑Fi join + setup URL)
         qr_png = tmp_dir / "setup_qr.png"
         _generate_composite_qr(setup_url, current_ap_ssid, current_ap_password, qr_png)
-        
+
         try:
             # Try to show QR with mpv; fallback to printing URL if mpv missing
             try:
@@ -1025,7 +1052,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
                 # QR code screen is now loaded - _display_with_mpv already waited up to 1.5 seconds
                 # Give it just a tiny moment more to ensure it's fully rendered and visible
                 await asyncio.sleep(1.5)
-                
+
                 # NOW stop loading.gif after QR code screen is confirmed loaded and visible
                 # Do this immediately while we know mpv_proc is still running
                 if loading_proc is not None and mpv_proc.poll() is None:
@@ -1076,7 +1103,7 @@ async def ensure_telegram_token(force: bool = False) -> None:
                                 await asyncio.to_thread(loading_proc.wait)
                         except Exception:
                             pass
-                    
+
                     # Now show loading3.gif before closing QR code screen
                     loading3_path = _project_root() / "loading3.gif"
                     if loading3_path.exists():
@@ -1087,13 +1114,11 @@ async def ensure_telegram_token(force: bool = False) -> None:
                             await asyncio.sleep(1.5)
                         except Exception as e:
                             print(f"[init] Could not show loading3.gif: {e}")
-                    
+
                     # Now close QR code screen (loading3.gif is already visible and covering it)
                     mpv_proc.terminate()
                     try:
-                        await asyncio.wait_for(
-                            asyncio.to_thread(mpv_proc.wait), timeout=1.0
-                        )
+                        await asyncio.wait_for(asyncio.to_thread(mpv_proc.wait), timeout=1.0)
                     except asyncio.TimeoutError:
                         mpv_proc.kill()
                         await asyncio.to_thread(mpv_proc.wait)
@@ -1104,15 +1129,18 @@ async def ensure_telegram_token(force: bool = False) -> None:
                             mpv_proc.kill()
                     except Exception:
                         pass
-            
+
             # Don't stop init_flow's loading3.gif - let MPV player take ownership
             # Store the process in an environment variable so MPV player can check it
             if loading_proc is not None and loading_proc.poll() is None:
                 # Store PID so MPV player knows loading3.gif is already running
                 import os
+
                 os.environ["MEDIA_BOT_LOADING_PID"] = str(loading_proc.pid)
-                print(f"[init] Leaving loading3.gif running (PID {loading_proc.pid}) - MPV player will manage it")
-            
+                print(
+                    f"[init] Leaving loading3.gif running (PID {loading_proc.pid}) - MPV player will manage it"
+                )
+
             await runner.cleanup()
 
     try:
@@ -1125,7 +1153,7 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
     """Ensure TRACKER_USERNAME and TRACKER_PASSWORD are available; if not, run the web form setup flow."""
     tracker_username = os.getenv("TRACKER_USERNAME")
     tracker_password = os.getenv("TRACKER_PASSWORD")
-    
+
     if tracker_username and tracker_password and not force:
         return
 
@@ -1168,6 +1196,7 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
         Returns:
             (runner, actual_port)
         """
+
         # Very lightweight request logging
         @web.middleware
         async def log_requests(request, handler):
@@ -1195,10 +1224,10 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
             data = await request.post()
             username = (data.get("tracker_username") or "").strip()
             password = (data.get("tracker_password") or "").strip()
-            
+
             # Validate input
             if not username or not password:
-                error_html = "<div class=\"error\">Both username and password are required.</div>"
+                error_html = '<div class="error">Both username and password are required.</div>'
                 html_content = _render_template(
                     "rutracker_setup.html",
                     ERROR_BOX=error_html,
@@ -1206,15 +1235,13 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
                     TRACKER_PASSWORD="",
                 )
                 return web.Response(text=html_content, content_type="text/html", status=400)
-            
+
             # Save credentials
             success, error_msg = await on_credentials_saved(username, password)
-            
+
             if success:
                 return web.Response(
-                    text='{"status": "success"}',
-                    content_type="application/json",
-                    status=200
+                    text='{"status": "success"}', content_type="application/json", status=200
                 )
             else:
                 error_html = f"<div class=\"error\">{html.escape(error_msg or 'Failed to save credentials')}</div>"
@@ -1225,7 +1252,7 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
                     TRACKER_PASSWORD="",
                 )
                 return web.Response(text=html_content, content_type="text/html", status=500)
-        
+
         app = web.Application(middlewares=[log_requests])
         app.router.add_get("/", handle_index)
         app.router.add_post("/submit", handle_submit)
@@ -1246,20 +1273,24 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
         return runner, actual_port
 
     runner: web.AppRunner | None = None
-    
+
     async def run_flow():
         nonlocal host_ip, desired_port, runner
-        
+
         # Start server; if desired port is busy, fall back to ephemeral port 0
         try:
-            runner, bound_port = await _start_rutracker_web_server("0.0.0.0", desired_port, on_credentials_saved)
+            runner, bound_port = await _start_rutracker_web_server(
+                "0.0.0.0", desired_port, on_credentials_saved
+            )
         except OSError:
-            runner, bound_port = await _start_rutracker_web_server("0.0.0.0", 0, on_credentials_saved)
-        
+            runner, bound_port = await _start_rutracker_web_server(
+                "0.0.0.0", 0, on_credentials_saved
+            )
+
         setup_url = f"http://{host_ip}:{bound_port}/"
         print(f"[init] RuTracker setup URL: {setup_url}")
         print(f"[init] Please open this URL in your browser to enter RuTracker credentials.")
-        
+
         # Wait for credentials with a timeout check in background
         async def wait_for_credentials():
             nonlocal runner
@@ -1291,8 +1322,10 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
                     return
             # Timeout - keep server running but log
             if runner is not None:
-                print(f"[init] RuTracker setup timeout after {max_wait} seconds. Server will keep running.")
-        
+                print(
+                    f"[init] RuTracker setup timeout after {max_wait} seconds. Server will keep running."
+                )
+
         # Start waiting in background (non-blocking)
         asyncio.create_task(wait_for_credentials())
 
@@ -1301,5 +1334,3 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
     except Exception as e:
         print(f"[init] Error in RuTracker setup flow: {e}")
         os.environ.pop("RUTRACKER_SETUP_ACTIVE", None)
-
-

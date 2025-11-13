@@ -14,7 +14,6 @@ from app.bot.screens import (
     SetupConfirmationScreen,
     StatusScreen,
     SystemControlScreen,
-    TorrentProvidersScreen,
     TorrentScreen,
     TVScreen,
 )
@@ -45,14 +44,15 @@ class ScreenRegistry:
         self.main_menu = MainMenuScreen()
         self.search_screen = SearchScreen(imdb_client)
         self.movie_selection_screen = MovieSelectionScreen(imdb_client)
-        self.torrent_providers_screen = TorrentProvidersScreen()
         self.rutracker_auth_screen = RuTrackerAuthScreen()
         self.torrent_screen = TorrentScreen(torrent_searcher, torrent_downloader, validator)
         self.library_screen = LibraryScreen(library_manager, mpv_controller)
         self.downloads_screen = DownloadsScreen(torrent_downloader)
         self.player_screen = PlayerScreen(mpv_controller, cec_controller)
         self.audio_track_selection_screen = AudioTrackSelectionScreen(mpv_controller)
-        self.status_screen = StatusScreen(mpv_controller, cec_controller, torrent_downloader, library_manager)
+        self.status_screen = StatusScreen(
+            mpv_controller, cec_controller, torrent_downloader, library_manager
+        )
         self.tv_screen = TVScreen(cec_controller)
         self.setup_confirmation_screen = SetupConfirmationScreen()
         self.system_control_screen = SystemControlScreen()
@@ -63,7 +63,6 @@ class ScreenRegistry:
             self.main_menu,
             self.search_screen,
             self.movie_selection_screen,
-            self.torrent_providers_screen,
             self.rutracker_auth_screen,
             self.torrent_screen,
             self.library_screen,

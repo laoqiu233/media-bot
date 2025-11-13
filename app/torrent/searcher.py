@@ -240,12 +240,15 @@ class TorrentSearcher:
         try:
             # Check environment variables directly in case credentials were updated
             import os
+
             username = self.config.tracker.username or os.getenv("TRACKER_USERNAME")
             password = self.config.tracker.password or os.getenv("TRACKER_PASSWORD")
             proxy = self.config.tracker.proxy or os.getenv("TRACKER_PROXY")
-            
+
             if not username or not password:
-                logger.error("RuTracker credentials not configured. Please set TRACKER_USERNAME and TRACKER_PASSWORD.")
+                logger.error(
+                    "RuTracker credentials not configured. Please set TRACKER_USERNAME and TRACKER_PASSWORD."
+                )
                 return results
 
             async with AsyncRuTrackerClient(

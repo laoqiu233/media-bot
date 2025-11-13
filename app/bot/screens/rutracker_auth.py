@@ -28,6 +28,7 @@ def _project_root() -> Path:
     # app/bot/screens/ -> project root
     return Path(__file__).resolve().parents[3]
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,8 +40,6 @@ def _detect_local_ip() -> str:
             return s.getsockname()[0]
     except Exception:
         return "127.0.0.1"
-
-
 
 
 class RuTrackerAuthScreen(Screen):
@@ -56,7 +55,7 @@ class RuTrackerAuthScreen(Screen):
 
     async def on_enter(self, context: Context, **kwargs) -> None:
         """Called when entering the screen.
-        
+
         Expects kwargs:
             movie: IMDbMovie object (for back navigation)
             movies: List of all movies (for back navigation)
@@ -69,7 +68,7 @@ class RuTrackerAuthScreen(Screen):
         detailed_movies = kwargs.get("detailed_movies", {})
         query = kwargs.get("query", "")
         page = kwargs.get("page", 0)
-        
+
         context.update_context(
             movie=movie,
             movies=movies,
@@ -77,7 +76,7 @@ class RuTrackerAuthScreen(Screen):
             query=query,
             page=page,
         )
-        
+
         # Start setup server in background if not already running
         if os.environ.get("RUTRACKER_SETUP_ACTIVE") != "1":
             asyncio.create_task(ensure_rutracker_credentials())
@@ -91,18 +90,18 @@ class RuTrackerAuthScreen(Screen):
         """Render the RuTracker authorization screen."""
         state = context.get_context()
         movie = state.get("movie")
-        
+
         # Check if credentials are already configured
         tracker_username = os.getenv("TRACKER_USERNAME")
         tracker_password = os.getenv("TRACKER_PASSWORD")
         has_credentials = bool(tracker_username and tracker_password)
-        
+
         # Detect IP and build setup URL
         host_ip = _detect_local_ip()
         setup_url = f"http://{host_ip}:8766/"
-        
+
         text = "🏴‍☠️ *RuTracker Authorization*\n\n"
-        
+
         if has_credentials:
             text += "✅ Credentials are configured.\n\n"
             text += "You can now use RuTracker to search for torrents.\n\n"
@@ -111,9 +110,9 @@ class RuTrackerAuthScreen(Screen):
             text += "⚠️ RuTracker credentials are required.\n\n"
             text += f"Please open this URL in your browser:\n`{setup_url}`\n\n"
             text += "After submitting your credentials, click 'Check Status' to verify."
-        
+
         keyboard = []
-        
+
         if has_credentials:
             # Continue button - proceed to search
             keyboard.append(
@@ -124,10 +123,10 @@ class RuTrackerAuthScreen(Screen):
             keyboard.append(
                 [InlineKeyboardButton("🔄 Check Status", callback_data=RUTRACKER_AUTH_CHECK)]
             )
-        
+
         # Back button
         keyboard.append([InlineKeyboardButton("« Back", callback_data=RUTRACKER_AUTH_BACK)])
-        
+
         return text, InlineKeyboardMarkup(keyboard), RenderOptions()
 
     async def handle_callback(
@@ -137,7 +136,7 @@ class RuTrackerAuthScreen(Screen):
     ) -> ScreenHandlerResult:
         """Handle callback queries."""
         state = context.get_context()
-        
+
         if query.data == RUTRACKER_AUTH_BACK:
             # Navigate back to provider selection
             return Navigation(
@@ -148,11 +147,11 @@ class RuTrackerAuthScreen(Screen):
                 query=state.get("query", ""),
                 page=state.get("page", 0),
             )
-        
+
         elif query.data == RUTRACKER_AUTH_CHECK:
             # Check if credentials have been loaded
             await query.answer("Checking status...", show_alert=False)
-            
+
             # Reload environment from .env file
             env_path = _project_root() / ".env"
             if env_path.exists():
@@ -162,19 +161,22 @@ class RuTrackerAuthScreen(Screen):
                         os.environ["TRACKER_USERNAME"] = line.split("=", 1)[1].strip()
                     elif line.startswith("TRACKER_PASSWORD="):
                         os.environ["TRACKER_PASSWORD"] = line.split("=", 1)[1].strip()
-            
+
             tracker_username = os.getenv("TRACKER_USERNAME")
             tracker_password = os.getenv("TRACKER_PASSWORD")
-            
+
             if tracker_username and tracker_password:
                 await query.answer("✅ Credentials loaded successfully!", show_alert=True)
                 # Re-render screen to show updated status
                 return None
             else:
-                await query.answer("❌ Credentials not found. Please submit them via the web form.", show_alert=True)
+                await query.answer(
+                    "❌ Credentials not found. Please submit them via the web form.",
+                    show_alert=True,
+                )
                 # Stay on current screen
                 return None
-        
+
         elif query.data == "rutracker_auth:continue:":
             # Credentials are configured, proceed to search
             movie = state.get("movie")
@@ -189,6 +191,5 @@ class RuTrackerAuthScreen(Screen):
                     query=state.get("query", ""),
                     movie_page=state.get("page", 0),
                 )
-        
-        return None
 
+        return None

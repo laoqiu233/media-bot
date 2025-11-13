@@ -15,7 +15,6 @@ from app.bot.screens.search import SearchScreen
 from app.bot.screens.setup_confirmation import SetupConfirmationScreen
 from app.bot.screens.status import StatusScreen
 from app.bot.screens.system_control import SystemControlScreen
-from app.bot.screens.torrent_providers import TorrentProvidersScreen
 from app.bot.screens.torrent import TorrentScreen
 from app.bot.screens.tv import TVScreen
 
@@ -35,7 +34,6 @@ __all__ = [
     "SetupConfirmationScreen",
     "StatusScreen",
     "SystemControlScreen",
-    "TorrentProvidersScreen",
     "TorrentScreen",
     "TVScreen",
 ]

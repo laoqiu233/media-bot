@@ -69,7 +69,9 @@ async def _get_available_sinks() -> list[tuple[str, str]]:
                     display_name = "3.5mm Jack (Analog)"
                 else:
                     # Use description or last part of name
-                    display_name = description or sink_name.split(".")[-1] if "." in sink_name else sink_name
+                    display_name = (
+                        description or sink_name.split(".")[-1] if "." in sink_name else sink_name
+                    )
 
                 sinks.append((sink_name, display_name))
                 logger.debug(f"Found sink: {sink_name} -> {display_name}")
@@ -207,7 +209,9 @@ class AudioOutputSelectionScreen(Screen):
 
             if current_sink:
                 # Find current sink in the list
-                current_display = next((display for name, display in sinks if name == current_sink), None)
+                current_display = next(
+                    (display for name, display in sinks if name == current_sink), None
+                )
                 if current_display:
                     text += f"Current: *{current_display}*\n\n"
                 else:
@@ -216,7 +220,7 @@ class AudioOutputSelectionScreen(Screen):
                 text += "Current: Unknown\n\n"
 
             text += "Select audio output:\n\n"
-            
+
             # Debug: show what we found
             logger.info(f"Rendering screen with {len(sinks)} sinks: {[d for _, d in sinks]}")
 
@@ -229,15 +233,15 @@ class AudioOutputSelectionScreen(Screen):
                 # Store sink name in callback data
                 # Telegram callback data has a 64-byte limit, so we need to ensure it fits
                 callback_data = f"{AUDIO_OUTPUT_SELECT}{sink_name}"
-                if len(callback_data.encode('utf-8')) > 64:
+                if len(callback_data.encode("utf-8")) > 64:
                     logger.warning(f"Callback data too long for sink {sink_name}, truncating")
                     # Use a hash or index instead if name is too long
-                    sink_index = next((i for i, (name, _) in enumerate(sinks) if name == sink_name), 0)
+                    sink_index = next(
+                        (i for i, (name, _) in enumerate(sinks) if name == sink_name), 0
+                    )
                     callback_data = f"{AUDIO_OUTPUT_SELECT}index:{sink_index}"
-                
-                keyboard.append(
-                    [InlineKeyboardButton(button_text, callback_data=callback_data)]
-                )
+
+                keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
                 logger.debug(f"Added button: {button_text} -> {callback_data[:50]}...")
 
             keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data=AUDIO_OUTPUT_BACK)])
@@ -268,7 +272,7 @@ class AudioOutputSelectionScreen(Screen):
         """
         try:
             logger.info(f"Audio output callback received: {query.data}")
-            
+
             if query.data == AUDIO_OUTPUT_BACK:
                 logger.info("Navigating back to system_control")
                 return Navigation(next_screen="system_control")
@@ -302,7 +306,9 @@ class AudioOutputSelectionScreen(Screen):
                 if success:
                     # Find display name for the message
                     sinks = await _get_available_sinks()
-                    display_name = next((display for name, display in sinks if name == sink_name), sink_name)
+                    display_name = next(
+                        (display for name, display in sinks if name == sink_name), sink_name
+                    )
                     await query.answer(f"✅ Switched to {display_name}")
                     logger.info(f"Successfully switched to {display_name}")
                 else:

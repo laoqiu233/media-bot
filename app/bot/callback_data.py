@@ -87,7 +87,9 @@ RESOLUTION_SELECT = "resolution:select:"  # Followed by resolution (e.g., "1920x
 
 # Audio output selection callbacks
 AUDIO_OUTPUT_BACK = "audio_output:back:"
-AUDIO_OUTPUT_SELECT = "audio_output:select:"  # Followed by output type (e.g., "hdmi", "analog", "auto")
+AUDIO_OUTPUT_SELECT = (
+    "audio_output:select:"  # Followed by output type (e.g., "hdmi", "analog", "auto")
+)
 
 # Movie selection screen callbacks
 MOVIE_SELECT = "movie:select:"  # Followed by movie index

@@ -14,7 +14,7 @@ from app.bot.screens.base import (
     ScreenHandlerResult,
     ScreenRenderResult,
 )
-from app.library.models import IMDbMovie
+from app.library.models import IMDbTitle
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class TorrentProvidersScreen(Screen):
         detailed_movies = kwargs.get("detailed_movies", {})
         query = kwargs.get("query", "")
         page = kwargs.get("page", 0)
-        
+
         context.update_context(
             selected_movie=movie,
             movies=movies,
@@ -99,7 +99,7 @@ class TorrentProvidersScreen(Screen):
     ) -> ScreenHandlerResult:
         """Handle callback queries."""
         state = context.get_context()
-        
+
         if query.data == MOVIE_BACK:
             # Pass back the movie list context for proper restoration
             return Navigation(
@@ -119,11 +119,11 @@ class TorrentProvidersScreen(Screen):
                 if provider == "rutracker":
                     tracker_username = os.getenv("TRACKER_USERNAME")
                     tracker_password = os.getenv("TRACKER_PASSWORD")
-                    
+
                     if not tracker_username or not tracker_password:
                         # Credentials missing - navigate to authorization screen
                         await query.answer("RuTracker credentials required", show_alert=True)
-                        
+
                         # Navigate to RuTracker authorization screen
                         return Navigation(
                             next_screen="rutracker_auth",
@@ -133,7 +133,7 @@ class TorrentProvidersScreen(Screen):
                             query=state.get("query", ""),
                             page=state.get("page", 0),
                         )
-                
+
                 await query.answer(f"Searching {provider.upper()}...", show_alert=False)
 
                 # Navigate to torrent results with movie, provider, and context for back navigation

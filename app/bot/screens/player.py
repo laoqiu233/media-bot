@@ -153,14 +153,14 @@ class PlayerScreen(Screen):
 
     async def handle_message(self, message: Message, context: Context) -> ScreenHandlerResult:
         text = message.text.strip()
-        neg = text.startswith('-')
-        if text.startswith('-') or text.startswith('+'):
+        neg = text.startswith("-")
+        if text.startswith("-") or text.startswith("+"):
             text = text[1:]
         mul = 1
-        if text.endswith('m'):
+        if text.endswith("m"):
             mul = 60
             text = text[:-1]
-        elif text.endswith('s'):
+        elif text.endswith("s"):
             text = text[:-1]
         amount = int(text)
         amount = mul * amount
