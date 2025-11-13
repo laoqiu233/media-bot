@@ -111,14 +111,12 @@ class MPVController:
 
             @self._player.event_callback("end-file")
             def end_file_callback(event):
-                # Save watch progress before cleaning up
-                current_file = self._current_file
-                
                 # When switching files, loadfile() triggers end-file for the old file.
                 # In play(), we set _is_playing = True and _current_file BEFORE calling loadfile(),
                 # so if _is_playing is True when end-file fires, it means we're switching files.
                 # Don't clear the state in that case - let the file-loaded event handle it.
                 event_reason = getattr(event, "reason", None)
+                is_switching = self._is_playing
                 
                 # Only clear playing state if _is_playing is False (real end, not switching files).
                 # When switching files, play() sets _is_playing = True BEFORE calling loadfile(),
@@ -139,19 +137,22 @@ class MPVController:
                 
                 self._trigger_event("playback_finished", event)
 
-                # Resume all downloads when playback ends (only if not switching files)
-                async def save_progress_resume_downloads_and_show_loading():
-                    # Check if we're switching files - if _is_playing is True, we're switching
-                    # (because play() sets it to True before loadfile())
-                    # Don't resume downloads or show loading.gif if switching
-                    if self._is_playing:
-                        logger.debug("File switch detected (is_playing=True), skipping download resume and loading.gif")
+                # Save progress when file ends (only if not switching, since we save in play() when switching)
+                # This is a backup for natural file endings
+                async def save_progress():
+                    """Save watch progress for the file that just ended."""
+                    # If switching, progress was already saved in play() before loadfile()
+                    # Only save here if this is a natural end (not switching)
+                    if is_switching:
+                        logger.debug("Skipping progress save in end-file (already saved in play() before switch)")
                         return
                     
-                    # Save watch progress first
+                    # Get the file that was playing (before _current_file was cleared)
+                    # Since we're not switching, _current_file should still be valid
+                    file_to_save = self._current_file
                     if (
                         self._watch_progress_manager is not None
-                        and current_file is not None
+                        and file_to_save is not None
                     ):
                         try:
                             # Get final position and duration
@@ -160,15 +161,29 @@ class MPVController:
                             
                             if position is not None and duration is not None:
                                 await self._watch_progress_manager.update_progress(
-                                    file_path=current_file,
+                                    file_path=file_to_save,
                                     position=position,
                                     duration=duration,
                                 )
                                 logger.info(
-                                    f"Saved watch progress: {current_file.name} at {int(position)}s"
+                                    f"Saved watch progress on end: {file_to_save.name} at {int(position)}s"
+                                )
+                            else:
+                                logger.warning(
+                                    f"Could not get position/duration for {file_to_save.name}, progress not saved"
                                 )
                         except Exception as e:
-                            logger.error(f"Error saving watch progress: {e}")
+                            logger.error(f"Error saving watch progress: {e}", exc_info=True)
+
+                # Resume downloads and show loading.gif (only if not switching files)
+                async def resume_downloads_and_show_loading():
+                    """Resume downloads and show loading.gif when playback truly ends."""
+                    # Check if we're switching files - if _is_playing is True, we're switching
+                    # (because play() sets it to True before loadfile())
+                    # Don't resume downloads or show loading.gif if switching
+                    if self._is_playing:
+                        logger.debug("File switch detected (is_playing=True), skipping download resume and loading.gif")
+                        return
                     
                     # Resume downloads
                     if self._downloader is not None:
@@ -185,18 +200,17 @@ class MPVController:
                     await asyncio.sleep(1.5)
                     await self._show_loading_gif()
 
-                # Schedule task on main event loop from MPV's callback thread
+                # Schedule tasks on main event loop from MPV's callback thread
                 loop = self._event_loop
                 if loop and loop.is_running():
-                    # Use run_coroutine_threadsafe to schedule from MPV's callback thread
-                    future = asyncio.run_coroutine_threadsafe(
-                        save_progress_resume_downloads_and_show_loading(), loop
-                    )
-                    # Store future to prevent garbage collection
-                    # Note: We don't need to await it, it's fire-and-forget
+                    # Always save progress (whether switching or stopping)
+                    asyncio.run_coroutine_threadsafe(save_progress(), loop)
+                    
+                    # Only resume downloads/show loading if not switching
+                    asyncio.run_coroutine_threadsafe(resume_downloads_and_show_loading(), loop)
                 else:
                     logger.warning(
-                        "Event loop not available for resuming downloads and showing loading gif"
+                        "Event loop not available for saving progress and resuming downloads"
                     )
 
             @self._player.event_callback("file-loaded")
@@ -302,6 +316,30 @@ class MPVController:
                             logger.info(f"Paused {paused_count} downloads for playback")
                     except Exception as e:
                         logger.error(f"Error pausing downloads for playback: {e}")
+
+                # Save progress for the currently playing file before switching (if any)
+                old_file = self._current_file
+                if (
+                    old_file is not None
+                    and self._watch_progress_manager is not None
+                    and old_file != file_path
+                ):
+                    try:
+                        # Get current position and duration before switching
+                        position = self._player.time_pos if self._player else None
+                        duration = self._player.duration if self._player else None
+                        
+                        if position is not None and duration is not None:
+                            await self._watch_progress_manager.update_progress(
+                                file_path=old_file,
+                                position=position,
+                                duration=duration,
+                            )
+                            logger.info(
+                                f"Saved watch progress before switch: {old_file.name} at {int(position)}s"
+                            )
+                    except Exception as e:
+                        logger.error(f"Error saving watch progress before switch: {e}")
 
                 # Set playing state and current file BEFORE loadfile() to prevent
                 # "end-file" event from clearing _is_playing when switching files
