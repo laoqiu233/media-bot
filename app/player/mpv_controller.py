@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,13 @@ try:
     import mpv
 except ImportError:
     mpv = None
+
+try:
+    from PIL import Image, ImageDraw, ImageFont
+except ImportError:
+    Image = None
+    ImageDraw = None
+    ImageFont = None
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +42,14 @@ class MPVController:
             self._current_file: Path | None = None
             self._is_playing = False
             self._event_handlers: dict[str, list[Callable]] = {}
-            self._loading_proc: Any | None = None  # Process for displaying loading.gif
+            self._loading_proc: Any | None = None  # Process for displaying loading.gif or download progress
             self._loading_proc_pid: int | None = None  # PID of loading.gif process from init_flow
             self._background_tasks: set[asyncio.Task] = set()  # Keep track of background tasks
             self._event_loop: asyncio.AbstractEventLoop | None = None  # Store event loop reference
             self._downloader: Any | None = None  # Torrent downloader reference for pause/resume
             self._watch_progress_manager: Any | None = None  # Watch progress manager
+            self._showing_download_progress: bool = False  # Track if we're showing download progress
+            self._progress_update_task: asyncio.Task | None = None  # Task for updating progress image
             self._initialized = True
 
     def initialize(
@@ -944,8 +954,415 @@ class MPVController:
                 except Exception as e:
                     logger.error(f"Error in event handler for {event}: {e}")
 
+    def _detect_screen_resolution(self) -> tuple[int, int]:
+        """Detect screen resolution, defaulting to 1920x1080 if detection fails."""
+        try:
+            result = subprocess.run(
+                ["xrandr"], capture_output=True, text=True, timeout=2
+            )
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    if " connected " in line and "x" in line:
+                        parts = line.split()
+                        for part in parts:
+                            if "x" in part and part[0].isdigit():
+                                try:
+                                    w, h = map(int, part.split("x"))
+                                    if w > 0 and h > 0:
+                                        return w, h
+                                except ValueError:
+                                    continue
+        except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+            pass
+        
+        # Default to 1920x1080 (common TV resolution)
+        return 1920, 1080
+
+    def _generate_download_progress_image(self, tasks: list[Any], out_path: Path) -> None:
+        """Generate an image showing download progress bars.
+        
+        Args:
+            tasks: List of DownloadState objects
+            out_path: Path where to save the PNG image
+        """
+        if Image is None or ImageDraw is None or ImageFont is None:
+            logger.warning("PIL not available, cannot generate download progress image")
+            return
+        
+        # Detect screen resolution for responsive design
+        screen_width, screen_height = self._detect_screen_resolution()
+        
+        # Responsive sizing
+        scale_factor = min(screen_width / 1920, screen_height / 1080, 1.5)
+        padding = int(60 * scale_factor)
+        title_height = int(120 * scale_factor)
+        item_height = int(140 * scale_factor)
+        progress_bar_height = int(40 * scale_factor)
+        spacing = int(30 * scale_factor)
+        
+        # Calculate layout
+        width = screen_width
+        height = screen_height
+        
+        # Create base image with gradient background (matching init_flow style)
+        img = Image.new("RGB", (width, height), color=(2, 6, 23))  # #020617
+        draw = ImageDraw.Draw(img)
+        
+        # Fast linear gradient
+        step = max(4, height // 200)
+        for y in range(0, height, step):
+            ratio = y / height if height > 0 else 0
+            if ratio < 0.45:
+                local_ratio = ratio / 0.45 if 0.45 > 0 else 0
+                r = int(30 - (30 - 15) * local_ratio)
+                g = int(41 - (41 - 23) * local_ratio)
+                b = int(59 - (59 - 42) * local_ratio)
+            else:
+                local_ratio = (ratio - 0.45) / 0.55 if 0.55 > 0 else 0
+                r = int(15 - (15 - 2) * local_ratio)
+                g = int(23 - (23 - 6) * local_ratio)
+                b = int(42 - (42 - 23) * local_ratio)
+            
+            draw.rectangle([(0, y), (width, min(y + step, height))], fill=(r, g, b))
+        
+        # Load fonts
+        font_size_title = int(44 * scale_factor)
+        font_size_item = int(28 * scale_factor)
+        font_size_progress = int(24 * scale_factor)
+        
+        try:
+            font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", font_size_title)
+            font_item = ImageFont.truetype("DejaVuSans-Bold.ttf", font_size_item)
+            font_progress = ImageFont.truetype("DejaVuSans.ttf", font_size_progress)
+        except Exception:
+            try:
+                font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size_title)
+                font_item = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size_item)
+                font_progress = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size_progress)
+            except Exception:
+                font_title = ImageFont.load_default()
+                font_item = ImageFont.load_default()
+                font_progress = ImageFont.load_default()
+        
+        # Title
+        title_text = "Downloads"
+        title_bbox = draw.textbbox((0, 0), title_text, font=font_title)
+        title_width = title_bbox[2] - title_bbox[0]
+        title_x = (width - title_width) // 2
+        title_y = padding
+        
+        # Draw title shadow and main title
+        draw.text((title_x + 2, title_y + 2), title_text, fill=(0, 0, 0), font=font_title)
+        draw.text((title_x, title_y), title_text, fill=(255, 255, 255), font=font_title)
+        
+        # Draw download items
+        y_offset = title_y + title_height + spacing
+        max_items = min(len(tasks), 8)  # Show max 8 items
+        
+        for i, task in enumerate(tasks[:max_items]):
+            if y_offset + item_height > height - padding:
+                break
+            
+            # Item name (truncate if too long)
+            item_name = task.name[:50] + "..." if len(task.name) > 50 else task.name
+            item_y = y_offset + i * (item_height + spacing)
+            
+            # Draw item name
+            draw.text((padding + 2, item_y + 2), item_name, fill=(0, 0, 0), font=font_item)
+            draw.text((padding, item_y), item_name, fill=(255, 255, 255), font=font_item)
+            
+            # Progress bar
+            progress = max(0.0, min(100.0, task.progress))
+            bar_x = padding
+            bar_y = item_y + int(50 * scale_factor)
+            bar_width = width - 2 * padding
+            bar_height = progress_bar_height
+            
+            # Progress bar background
+            draw.rectangle(
+                [(bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height)],
+                fill=(15, 23, 42)
+            )
+            
+            # Progress bar fill
+            fill_width = int(bar_width * (progress / 100.0))
+            if fill_width > 0:
+                # Gradient for progress fill
+                for x in range(bar_x, bar_x + fill_width, 2):
+                    ratio = (x - bar_x) / bar_width if bar_width > 0 else 0
+                    r = int(34 + (59 - 34) * ratio)
+                    g = int(197 + (130 - 197) * ratio)
+                    b = int(94 + (246 - 94) * ratio)
+                    draw.rectangle(
+                        [(x, bar_y), (min(x + 2, bar_x + fill_width), bar_y + bar_height)],
+                        fill=(r, g, b)
+                    )
+            
+            # Progress text
+            progress_text = f"{progress:.1f}%"
+            if task.total_wanted > 0:
+                downloaded_gb = task.total_done / 1024 / 1024 / 1024
+                total_gb = task.total_wanted / 1024 / 1024 / 1024
+                progress_text += f" ({downloaded_gb:.2f} / {total_gb:.2f} GB)"
+            
+            progress_bbox = draw.textbbox((0, 0), progress_text, font=font_progress)
+            progress_text_width = progress_bbox[2] - progress_bbox[0]
+            progress_text_x = bar_x + bar_width - progress_text_width
+            progress_text_y = bar_y + (bar_height - int(24 * scale_factor)) // 2
+            
+            draw.text((progress_text_x + 1, progress_text_y + 1), progress_text, fill=(0, 0, 0), font=font_progress)
+            draw.text((progress_text_x, progress_text_y), progress_text, fill=(220, 240, 255), font=font_progress)
+        
+        # Save with maximum quality
+        img.save(out_path, quality=100, optimize=False)
+
+    async def _update_progress_image(self) -> None:
+        """Background task to periodically update the download progress image."""
+        while self._showing_download_progress:
+            try:
+                await asyncio.sleep(2.0)  # Update every 2 seconds
+                
+                if not self._showing_download_progress:
+                    break
+                
+                if self._downloader is None:
+                    break
+                
+                tasks = await self._downloader.get_all_tasks()
+                active_statuses = ["downloading", "checking", "queued"]
+                active_tasks = [t for t in tasks if t.status.value in active_statuses]
+                
+                if not active_tasks:
+                    # No active downloads, switch back to loading3.gif
+                    self._showing_download_progress = False
+                    if self._progress_update_task:
+                        self._progress_update_task.cancel()
+                        self._progress_update_task = None
+                    
+                    # Stop progress display and show loading3.gif smoothly
+                    old_proc = self._loading_proc
+                    
+                    # Start loading3.gif first
+                    project_root = Path(__file__).resolve().parents[2]
+                    loading_path = project_root / "loading3.gif"
+                    if loading_path.exists():
+                        cmd = [
+                            "mpv",
+                            "--no-terminal",
+                            "--force-window=yes",
+                            "--image-display-duration=inf",
+                            "--loop-file=inf",
+                            "--fs",
+                            "--no-border",
+                            "--no-window-dragging",
+                            "--no-input-default-bindings",
+                            "--no-input-vo-keyboard",
+                            "--keepaspect=no",
+                            "--video-unscaled=no",
+                            "--panscan=1.0",
+                            "--video-margin-ratio-left=0",
+                            "--video-margin-ratio-right=0",
+                            "--video-margin-ratio-top=0",
+                            "--video-margin-ratio-bottom=0",
+                            "--fullscreen",
+                            str(loading_path),
+                        ]
+                        new_proc = subprocess.Popen(
+                            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                        )
+                        self._loading_proc = new_proc
+                        
+                        # Wait for loading3.gif to be visible
+                        for _ in range(15):
+                            await asyncio.sleep(0.1)
+                            if new_proc.poll() is not None:
+                                break
+                    
+                    # Now close old progress display
+                    if old_proc is not None and old_proc.poll() is None:
+                        try:
+                            old_proc.terminate()
+                            try:
+                                await asyncio.wait_for(asyncio.to_thread(old_proc.wait), timeout=0.5)
+                            except asyncio.TimeoutError:
+                                old_proc.kill()
+                                await asyncio.to_thread(old_proc.wait)
+                        except Exception:
+                            pass
+                    break
+                
+                # Regenerate progress image
+                project_root = Path(__file__).resolve().parents[2]
+                tmp_dir = project_root / ".setup"
+                tmp_dir.mkdir(parents=True, exist_ok=True)
+                progress_png = tmp_dir / "download_progress.png"
+                
+                self._generate_download_progress_image(active_tasks, progress_png)
+                
+                # Reload image smoothly - start new process before closing old one
+                old_proc = self._loading_proc
+                
+                cmd = [
+                    "mpv",
+                    "--no-terminal",
+                    "--force-window=yes",
+                    "--image-display-duration=inf",
+                    "--loop-file=inf",
+                    "--fs",
+                    "--no-border",
+                    "--no-window-dragging",
+                    "--no-input-default-bindings",
+                    "--no-input-vo-keyboard",
+                    "--keepaspect=no",
+                    "--video-unscaled=no",
+                    "--panscan=1.0",
+                    "--video-margin-ratio-left=0",
+                    "--video-margin-ratio-right=0",
+                    "--video-margin-ratio-top=0",
+                    "--video-margin-ratio-bottom=0",
+                    "--fullscreen",
+                    str(progress_png),
+                ]
+                
+                # Start new process first
+                new_proc = subprocess.Popen(
+                    cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+                self._loading_proc = new_proc
+                
+                # Wait for new image to be visible
+                for _ in range(15):
+                    await asyncio.sleep(0.1)
+                    if new_proc.poll() is not None:
+                        break
+                
+                # Now close old process (new one is already visible)
+                if old_proc is not None and old_proc.poll() is None:
+                    try:
+                        old_proc.terminate()
+                        try:
+                            await asyncio.wait_for(asyncio.to_thread(old_proc.wait), timeout=0.5)
+                        except asyncio.TimeoutError:
+                            old_proc.kill()
+                            await asyncio.to_thread(old_proc.wait)
+                    except Exception:
+                        pass
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error updating progress image: {e}", exc_info=True)
+                await asyncio.sleep(2.0)  # Wait before retrying
+
+    async def _show_download_progress(self) -> bool:
+        """Display download progress on TV if there are active downloads.
+        
+        Returns:
+            True if progress was displayed, False if no active downloads
+        """
+        if self._downloader is None:
+            return False
+        
+        try:
+            tasks = await self._downloader.get_all_tasks()
+            # Filter active downloads (downloading, checking, or queued)
+            active_statuses = ["downloading", "checking", "queued"]
+            active_tasks = [t for t in tasks if t.status.value in active_statuses]
+            
+            if not active_tasks:
+                return False
+            
+            # Generate progress image
+            project_root = Path(__file__).resolve().parents[2]
+            tmp_dir = project_root / ".setup"
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+            progress_png = tmp_dir / "download_progress.png"
+            
+            self._generate_download_progress_image(active_tasks, progress_png)
+            
+            # Display with mpv
+            cmd = [
+                "mpv",
+                "--no-terminal",
+                "--force-window=yes",
+                "--image-display-duration=inf",
+                "--loop-file=inf",
+                "--fs",
+                "--no-border",
+                "--no-window-dragging",
+                "--no-input-default-bindings",
+                "--no-input-vo-keyboard",
+                "--keepaspect=no",
+                "--video-unscaled=no",
+                "--panscan=1.0",
+                "--video-margin-ratio-left=0",
+                "--video-margin-ratio-right=0",
+                "--video-margin-ratio-top=0",
+                "--video-margin-ratio-bottom=0",
+                "--fullscreen",
+                str(progress_png),
+            ]
+            
+            # Save old process reference
+            old_proc = self._loading_proc
+            
+            # Start new progress display first (before closing old one to avoid gap)
+            new_proc = subprocess.Popen(
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            self._loading_proc = new_proc
+            
+            # Wait for new image to be visible
+            for _ in range(15):
+                await asyncio.sleep(0.1)
+                if new_proc.poll() is not None:
+                    break
+            
+            # Now close old process (new one is already visible)
+            if old_proc is not None and old_proc.poll() is None:
+                try:
+                    old_proc.terminate()
+                    try:
+                        await asyncio.wait_for(asyncio.to_thread(old_proc.wait), timeout=0.5)
+                    except asyncio.TimeoutError:
+                        old_proc.kill()
+                        await asyncio.to_thread(old_proc.wait)
+                except Exception:
+                    pass
+            
+            # Start background task to update progress periodically
+            self._showing_download_progress = True
+            if self._progress_update_task is None or self._progress_update_task.done():
+                self._progress_update_task = asyncio.create_task(self._update_progress_image())
+                self._background_tasks.add(self._progress_update_task)
+            
+            logger.info(f"Displaying download progress for {len(active_tasks)} active download(s)")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error showing download progress: {e}", exc_info=True)
+            return False
+
     async def _show_loading_gif(self) -> None:
-        """Display loading3.gif on TV when no media is playing."""
+        """Display loading3.gif on TV when no media is playing.
+        
+        First checks for active downloads and shows progress if available.
+        """
+        # Stop progress update task if running
+        if self._progress_update_task is not None:
+            self._showing_download_progress = False
+            self._progress_update_task.cancel()
+            try:
+                await self._progress_update_task
+            except asyncio.CancelledError:
+                pass
+            self._progress_update_task = None
+        
+        # Check for active downloads first
+        if await self._show_download_progress():
+            return  # Download progress is showing, don't show loading3.gif
+        
+        # No active downloads, show loading3.gif
         if self._loading_proc is not None:
             # Check if the process is still running
             if self._loading_proc.poll() is None:
