@@ -18,6 +18,7 @@ from app.library.manager import LibraryManager
 from app.player.mpv_controller import MPVController
 from app.torrent.downloader import TorrentDownloader
 from app.tv.hdmi_cec import CECController
+from app.library.models import MediaType
 
 logger = logging.getLogger(__name__)
 
@@ -84,8 +85,9 @@ class StatusScreen(Screen):
             paused_downloads = [t for t in tasks if t.status == "paused"]
 
             # Get library count
-            movies = await self.library_manager.get_all_movies()
-            movies_count = len(movies)
+            media_entities = self.library_manager.get_all_media_entities()
+            movies_count = len([m for m in media_entities if m.media_type == MediaType.MOVIE])
+            series_count = len([m for m in media_entities if m.media_type == MediaType.SERIES])
 
             status_text += f"\n📥 *Downloads:*\n"
             status_text += f"Active: {len(active_downloads)}\n"
@@ -94,6 +96,7 @@ class StatusScreen(Screen):
             if completed_downloads:
                 status_text += f"Completed: {len(completed_downloads)}\n"
             status_text += f"Films in library: {movies_count}\n"
+            status_text += f"Series in library: {series_count}\n"
 
             keyboard = [
                 [InlineKeyboardButton("⬅️ Back", callback_data=STATUS_BACK)],
