@@ -327,11 +327,14 @@ async def _stop_loading3_gif() -> None:
     Checks for MEDIA_BOT_LOADING_PID environment variable and stops the process.
     """
     loading_pid_str = os.environ.get("MEDIA_BOT_LOADING_PID")
+    print(loading_pid_str)
     if not loading_pid_str:
         return
     
     try:
         loading_pid = int(loading_pid_str)
+        print(loading_pid)
+
         # Check if process is still running
         try:
             result = subprocess.run(
