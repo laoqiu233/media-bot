@@ -108,6 +108,11 @@ class TorrentDownloader:
             # Try the newer API (libtorrent 2.x)
             settings = lt.session_params()
             settings.settings.user_agent = "MediaBot/1.0"
+            # Enable DHT, LSD, UPnP for better peer discovery
+            settings.settings.enable_dht = True
+            settings.settings.enable_lsd = True
+            settings.settings.enable_upnp = True
+            settings.settings.enable_natpmp = True
             self.session = lt.session(settings)
         except (AttributeError, TypeError):
             # Fall back to older API (libtorrent 1.x)
@@ -117,12 +122,25 @@ class TorrentDownloader:
             with suppress(AttributeError):
                 # Even older API
                 self.session.listen_on(6881, 6891)
+            
+            # Try to enable DHT and other discovery for older API
+            try:
+                self.session.set_settings({
+                    "enable_dht": True,
+                    "enable_lsd": True,
+                    "enable_upnp": True,
+                    "enable_natpmp": True,
+                })
+            except (AttributeError, TypeError):
+                logger.warning("Could not configure DHT settings for libtorrent 1.x")
 
         # Add DHT routers
         try:
             self.session.add_dht_router("router.bittorrent.com", 6881)
             self.session.add_dht_router("router.utorrent.com", 6881)
             self.session.add_dht_router("dht.transmissionbt.com", 6881)
+            self.session.add_dht_router("dht.libtorrent.org", 25401)
+            logger.info("DHT routers configured")
         except AttributeError:
             # DHT router methods not available in this version
             logger.warning("DHT router configuration not available in this libtorrent version")
@@ -363,6 +381,8 @@ class TorrentDownloader:
                 # Parse magnet link
                 params = lt.parse_magnet_uri(torrent.magnet_link)
                 params.save_path = str(self.download_path)
+                # Set file priorities using attribute assignment (not item assignment)
+                params.file_priorities = file_priorities
             else:
                 torrent_file_path = await torrent.fetch_torrent_file()
                 # Parse torrent info to set file priorities
@@ -370,8 +390,8 @@ class TorrentDownloader:
                 params = {
                     "save_path": str(self.download_path),
                     "ti": torrent_info,
+                    "file_priorities": file_priorities,
                 }
-            params["file_priorities"] = file_priorities
             handle = self.session.add_torrent(params)
 
             # Store download state
@@ -725,6 +745,19 @@ class TorrentDownloader:
                     if persistent_state.magnet_link is not None:
                         params = lt.parse_magnet_uri(persistent_state.magnet_link)
                         params.save_path = str(self.download_path)
+                        # Set file priorities using attribute assignment (not item assignment)
+                        params.file_priorities = persistent_state.file_priorities
+                        
+                        # Check for fastresume data
+                        fastresume_path = self.download_path / "torrents" / f"{task_id}.fastresume"
+                        if fastresume_path.exists():
+                            try:
+                                with open(fastresume_path, "rb") as f:
+                                    resume_data = f.read()
+                                params.resume_data = resume_data
+                                logger.debug(f"Loaded fastresume data for {task_id}")
+                            except Exception as e:
+                                logger.warning(f"Failed to load fastresume data for {task_id}: {e}")
                     elif persistent_state.torrent_file_path is not None:
                         torrent_file = Path(persistent_state.torrent_file_path)
                         if not torrent_file.exists():
@@ -737,25 +770,23 @@ class TorrentDownloader:
                         params = {
                             "save_path": str(self.download_path),
                             "ti": torrent_info,
+                            "file_priorities": persistent_state.file_priorities,
                         }
+                        
+                        # Check for fastresume data (for dict-based params)
+                        fastresume_path = self.download_path / "torrents" / f"{task_id}.fastresume"
+                        if fastresume_path.exists():
+                            try:
+                                with open(fastresume_path, "rb") as f:
+                                    resume_data = f.read()
+                                params["resume_data"] = resume_data
+                                logger.debug(f"Loaded fastresume data for {task_id}")
+                            except Exception as e:
+                                logger.warning(f"Failed to load fastresume data for {task_id}: {e}")
                     else:
                         logger.warning(f"No torrent source for {task_id}, skipping")
                         await self._remove_download_state(task_id)
                         continue
-
-                    # Apply file priorities
-                    params["file_priorities"] = persistent_state.file_priorities
-
-                    # Check for fastresume data
-                    fastresume_path = self.download_path / "torrents" / f"{task_id}.fastresume"
-                    if fastresume_path.exists():
-                        try:
-                            with open(fastresume_path, "rb") as f:
-                                resume_data = f.read()
-                            params["resume_data"] = resume_data
-                            logger.debug(f"Loaded fastresume data for {task_id}")
-                        except Exception as e:
-                            logger.warning(f"Failed to load fastresume data for {task_id}: {e}")
 
                     handle = self.session.add_torrent(params)
 

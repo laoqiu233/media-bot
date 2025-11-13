@@ -28,13 +28,14 @@ LIBRARY_SHOW_MOVIES = "library:show_movies:"
 LIBRARY_SHOW_SERIES = "library:show_series:"
 LIBRARY_RESCAN = "library:rescan:"
 LIBRARY_SELECT_ENTITY = "library:select_entity:"  # Followed by entity_id
-LIBRARY_LIST_VIDEOS = "library:list_videos:"  # Followed by entity_id
 LIBRARY_NEXT_PAGE = "library:next_page:"
 LIBRARY_PREV_PAGE = "library:prev_page:"
 LIBRARY_CLEAR_FILTER = "library:clear_filter:"
 LIBRARY_DELETE = "library:delete:"  # Followed by entity_id
 LIBRARY_BACK = "library:back"
 LIBRARY_PLAY = "library:play"  # Followed by file id
+LIBRARY_TOGGLE_DELETE_FILES_MODE = "library:toggle_delete_files_mode:"
+LIBRARY_DELETE_FILE = "library:delete_file:"  # Followed by file id
 
 # Player screen callbacks
 PLAYER_BACK = "player:back:"

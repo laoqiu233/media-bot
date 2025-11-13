@@ -275,16 +275,31 @@ class TorrentImporter:
         # Try direct path
         full_path = download_path / file_path
         if full_path.exists() and full_path.is_file():
+            logger.debug(f"Found file at direct path: {full_path}")
             return full_path
+
+        # Often the file_path includes the torrent name as a prefix directory
+        # but download_path already points to that directory.
+        # Try stripping the first directory component
+        file_path_obj = Path(file_path)
+        if len(file_path_obj.parts) > 1:
+            stripped_path = Path(*file_path_obj.parts[1:])
+            full_path = download_path / stripped_path
+            if full_path.exists() and full_path.is_file():
+                logger.debug(f"Found file at stripped path: {full_path}")
+                return full_path
 
         # Try just the filename (for single-file torrents)
         filename = Path(file_path).name
         if download_path.is_file() and download_path.name == filename:
+            logger.debug(f"Found single file: {download_path}")
             return download_path
 
         # Search in subdirectories
+        logger.debug(f"Searching recursively for {filename} in {download_path}")
         for item in download_path.rglob(filename):
             if item.is_file():
+                logger.debug(f"Found file via rglob: {item}")
                 return item
 
         logger.warning(f"File not found: {file_path} in {download_path}")

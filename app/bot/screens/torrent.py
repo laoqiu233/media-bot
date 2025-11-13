@@ -230,13 +230,10 @@ class TorrentScreen(Screen):
 
         # Show results with details in text
         for i, result in enumerate(page_results):
-            # Escape markdown characters in all displayed fields
-            logger.info(f"Result: {result.title}")
             safe_title = (
                 result.title.replace("*", "\\*")
                 .replace("_", "\\_")
                 .replace("`", "\\`")
-                .replace("[", "\\[")
             )
             text += f"{i + 1}. *{safe_title}*\n"
             text += f"   📁 {result.quality.value.capitalize()} • {result.size} • 🌱 {result.seeders} seeders\n\n"

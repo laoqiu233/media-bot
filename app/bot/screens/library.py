@@ -9,7 +9,8 @@ from app.bot.callback_data import (
     LIBRARY_BACK,
     LIBRARY_CLEAR_FILTER,
     LIBRARY_DELETE,
-    LIBRARY_LIST_VIDEOS,
+    LIBRARY_DELETE_FILE,
+    LIBRARY_TOGGLE_DELETE_FILES_MODE,
     LIBRARY_NEXT_PAGE,
     LIBRARY_PLAY,
     LIBRARY_PREV_PAGE,
@@ -32,7 +33,7 @@ from app.player.mpv_controller import MPVController
 
 logger = logging.getLogger(__name__)
 
-ITEMS_PER_PAGE = 8
+ITEMS_PER_PAGE = 5
 LIBRARY_SCREEN_STATE = "library_screen_state"
 
 
@@ -47,7 +48,7 @@ class LibraryScreenState:
     entity_pages_list: list[int] = field(default_factory=list)
     filter_query: str = ""
     selected_entity: MediaEntity | None = None
-
+    delete_files_mode: bool = False
 
 class LibraryScreen(Screen):
     """Screen for browsing and managing library content."""
@@ -324,14 +325,39 @@ class LibraryScreen(Screen):
                         ]
                     )
                 else:
-                    keyboard.append(
-                        [
-                            InlineKeyboardButton(
-                                "📂 Select Video",
-                                callback_data=f"{LIBRARY_LIST_VIDEOS}{entity.imdb_id}",
-                            )
-                        ]
-                    )
+                    page = state.entity_pages_list[-1]
+                    start_idx = page * ITEMS_PER_PAGE
+                    end_idx = start_idx + ITEMS_PER_PAGE
+                    page_entities = entity.downloaded_files[start_idx:end_idx]
+                    for file in page_entities:
+                        button_text = file.file_name
+                        if len(button_text) > 40:
+                            button_text = button_text[:37] + "..."
+                        if state.delete_files_mode:
+                            button_text = f"🗑️ Delete {button_text}"
+                            callback_data = f"{LIBRARY_DELETE_FILE}{file.id}"
+                        else:
+                            button_text = f"▶️ Play {button_text}"
+                            callback_data = f"{LIBRARY_PLAY}{file.id}"
+                        keyboard.append(
+                            [InlineKeyboardButton(button_text, callback_data=callback_data)]
+                        )
+                    videos_pagination_buttons = []
+                    if page > 0:
+                        videos_pagination_buttons.append(InlineKeyboardButton("« Previous", callback_data=LIBRARY_PREV_PAGE))
+                    if end_idx < len(entity.downloaded_files):
+                        videos_pagination_buttons.append(InlineKeyboardButton("Next »", callback_data=LIBRARY_NEXT_PAGE))
+                    if videos_pagination_buttons:
+                        keyboard.append(videos_pagination_buttons)
+
+                    if state.delete_files_mode:
+                        keyboard.append(
+                            [InlineKeyboardButton("📂 Watch Files", callback_data=LIBRARY_TOGGLE_DELETE_FILES_MODE)]
+                        )
+                    else:
+                        keyboard.append(
+                            [InlineKeyboardButton("🗑️ Delete Files", callback_data=LIBRARY_TOGGLE_DELETE_FILES_MODE)]
+                        )
         else:
             children = await self.library.get_child_entities(entity)
             page = state.entity_pages_list[-1]
@@ -424,7 +450,7 @@ class LibraryScreen(Screen):
                 parent_entity = await self.library.get_parent_entity(state.selected_entity)
                 state.selected_entity = parent_entity
                 state.entity_pages_list.pop()
-            if state.view == "main":
+            elif state.view == "main":
                 return Navigation(next_screen="main_menu")
             else:
                 state.view = "main"
@@ -442,10 +468,16 @@ class LibraryScreen(Screen):
 
         # Pagination
         elif query.data == LIBRARY_NEXT_PAGE:
-            state.entity_list_page += 1
+            if state.selected_entity is not None:
+                state.entity_pages_list[-1] = state.entity_pages_list[-1] + 1
+            else:
+                state.entity_list_page += 1
 
         elif query.data == LIBRARY_PREV_PAGE:
-            state.entity_list_page = max(0, state.entity_list_page - 1)
+            if state.selected_entity is not None:
+                state.entity_pages_list[-1] = max(0, state.entity_pages_list[-1] - 1)
+            else:
+                state.entity_list_page = max(0, state.entity_list_page - 1)
 
         # Clear filter
         elif query.data == LIBRARY_CLEAR_FILTER:
@@ -455,6 +487,7 @@ class LibraryScreen(Screen):
 
         # Move to entity
         elif query.data.startswith(LIBRARY_SELECT_ENTITY):
+            state.delete_files_mode = False
             entity_id = query.data[len(LIBRARY_SELECT_ENTITY) :]
             entity = await self.library.get_entity(entity_id)
             if entity is not None:
@@ -469,6 +502,9 @@ class LibraryScreen(Screen):
             else:
                 state.selected_entity = None
                 state.entity_pages_list = []
+
+        elif query.data == LIBRARY_TOGGLE_DELETE_FILES_MODE:
+            state.delete_files_mode = not state.delete_files_mode
 
         # Play
         elif query.data.startswith(LIBRARY_PLAY):
@@ -488,6 +524,11 @@ class LibraryScreen(Screen):
                 state.selected_entity = await self.library.get_entity(next_entity)
             else:
                 state.selected_entity = None
+        
+        elif query.data.startswith(LIBRARY_DELETE_FILE):
+            file_id = query.data[len(LIBRARY_DELETE_FILE) :]
+            if state.selected_entity is not None:
+                await self.library.delete_file(state.selected_entity.imdb_id, file_id)
 
     async def handle_message(self, message: Message, context: Context) -> ScreenHandlerResult:
         """Handle text messages for filtering."""
