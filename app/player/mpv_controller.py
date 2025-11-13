@@ -1288,6 +1288,7 @@ class MPVController:
                                 break
                         
                         # Now close old progress display
+                        await asyncio.sleep(1.5)
                         if old_proc is not None and old_proc.poll() is None:
                             try:
                                 old_proc.terminate()
