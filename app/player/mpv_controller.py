@@ -111,7 +111,6 @@ class MPVController:
 
             @self._player.event_callback("end-file")
             def end_file_callback(event):
-<<<<<<< HEAD
                 # When switching files, loadfile() triggers end-file for the old file.
                 # In play(), we set _is_playing = True and _current_file BEFORE calling loadfile(),
                 # so if _is_playing is True when end-file fires, it means we're switching files.
@@ -155,19 +154,6 @@ class MPVController:
                         self._watch_progress_manager is not None
                         and file_to_save is not None
                     ):
-=======
-                # Save watch progress before cleaning up
-                current_file = self._current_file
-
-                self._is_playing = False
-                self._current_file = None
-                self._trigger_event("playback_finished", event)
-
-                # Resume all downloads when playback ends
-                async def save_progress_resume_downloads_and_show_loading():
-                    # Save watch progress first
-                    if self._watch_progress_manager is not None and current_file is not None:
->>>>>>> a4fb724 (Fix library navigation and magnet links)
                         try:
                             # Get final position and duration
                             position = self._player.time_pos if self._player else None
@@ -187,7 +173,6 @@ class MPVController:
                                     f"Could not get position/duration for {file_to_save.name}, progress not saved"
                                 )
                         except Exception as e:
-<<<<<<< HEAD
                             logger.error(f"Error saving watch progress: {e}", exc_info=True)
 
                 # Resume downloads and show loading.gif (only if not switching files)
@@ -200,10 +185,6 @@ class MPVController:
                         logger.debug("File switch detected (is_playing=True), skipping download resume and loading.gif")
                         return
                     
-=======
-                            logger.error(f"Error saving watch progress: {e}")
-
->>>>>>> a4fb724 (Fix library navigation and magnet links)
                     # Resume downloads
                     if self._downloader is not None:
                         try:
