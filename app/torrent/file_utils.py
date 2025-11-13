@@ -40,6 +40,7 @@ def parse_episode_info(filename: str) -> tuple[str, str] | None:
         Dictionary with 'season' and 'episode' as strings, or None if not found
 
     Examples:
+        "Show.S01.E05.mkv" -> {"season": "1", "episode": "5"}
         "Show.S01E05.mkv" -> {"season": "1", "episode": "5"}
         "Show.1x03.mp4" -> {"season": "1", "episode": "3"}
         "Show.Season.2.Episode.4.avi" -> {"season": "2", "episode": "4"}
@@ -48,7 +49,7 @@ def parse_episode_info(filename: str) -> tuple[str, str] | None:
     name = filename.rsplit(".", 1)[0]
 
     # Pattern 1: S01E02, s01e02, S1E2
-    pattern1 = re.search(r"[Ss](\d+)[Ee](\d+)", name)
+    pattern1 = re.search(r"[Ss](\d+)\.?[Ee](\d+)", name)
     if pattern1:
         return (str(pattern1.group(1)), str(pattern1.group(2)))
 

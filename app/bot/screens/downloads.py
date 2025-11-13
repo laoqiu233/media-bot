@@ -246,7 +246,7 @@ class DownloadsScreen(Screen):
 
             # Confirm via alert
             await query.answer(
-                f"Canceling: {task.torrent_name[:30]}...\nFiles will be removed.", show_alert=True
+                f"Canceling: {task.name[:30]}...\nFiles will be removed.", show_alert=True
             )
 
             success = await self.downloader.remove_download(task_id, delete_files=True)

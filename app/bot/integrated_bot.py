@@ -17,7 +17,7 @@ from app.library.manager import LibraryManager
 from app.player.mpv_controller import player
 from app.scheduler.series_scheduler import get_scheduler
 from app.scheduler.series_updater import SeriesUpdater
-from app.torrent.downloader import DownloadState, get_downloader
+from app.torrent.downloader import DownloadState, TorrentDownloader
 from app.torrent.importer import TorrentImporter
 from app.torrent.searcher import TorrentSearcher
 from app.tv.hdmi_cec import get_cec_controller
@@ -55,7 +55,7 @@ async def initialize_components():
 
     # Initialize torrent system
     torrent_searcher = TorrentSearcher(config)
-    torrent_downloader = get_downloader(config)
+    torrent_downloader = TorrentDownloader(config)
 
     # Initialize torrent importer
     torrent_importer = TorrentImporter(library_manager, imdb_client)
@@ -88,6 +88,12 @@ async def initialize_components():
         except Exception as e:
             logger.error(f"Failed to import download {task_id}: {e}", exc_info=True)
 
+    # Load and resume persisted downloads
+    resumed_count = await torrent_downloader.load_and_resume_downloads()
+    if resumed_count > 0:
+        logger.info(f"Resumed {resumed_count} download(s) from previous session")
+
+    # Set completion callback and start monitoring
     torrent_downloader.set_completion_callback(on_download_complete)
     torrent_downloader.start_monitoring()
     logger.info("Torrent system initialized")
@@ -119,14 +125,6 @@ async def initialize_components():
     await series_scheduler.load_progress()
     logger.info("Series scheduler initialized")
 
-    # Initialize series updater (will be started after bot is ready)
-    series_updater = SeriesUpdater(
-        library_manager=library_manager,
-        imdb_client=imdb_client,
-        download_path=config.media_library.download_path,
-        bot_instance=None,  # Will be set after bot initialization
-    )
-
     screen_registry = ScreenRegistry(
         library_manager,
         mpv_controller,
@@ -145,7 +143,6 @@ async def initialize_components():
         torrent_downloader,
         mpv_controller,
         series_scheduler,
-        series_updater,
     )
 
 
@@ -174,7 +171,6 @@ def run_integrated_bot():
                 downloader,
                 player_controller,
                 scheduler,
-                series_updater,
             ) = await initialize_components()
 
             # Create Telegram application
@@ -223,12 +219,6 @@ def run_integrated_bot():
                 logger.info("Setup complete. Please restart the bot.")
                 return
 
-            # Start series updater (now that bot is ready)
-            if series_updater:
-                series_updater.bot_instance = application.bot
-                series_updater.start()
-                logger.info("Series updater started")
-
             # Keep the bot running
             try:
                 # Wait indefinitely until interrupted
@@ -247,7 +237,6 @@ def run_integrated_bot():
             # Cleanup
             logger.info("Shutting down...")
             if downloader:
-                downloader.stop_monitoring()
                 downloader.shutdown()
             if player_controller:
                 player_controller.shutdown()

@@ -33,24 +33,12 @@ class MediaLibraryConfig(BaseModel):
         default=Path.home() / "media_library",
         description="Root path for media library",
     )
-    download_path: Path = Field(
-        default=Path.home() / "downloads",
-        description="Path for downloading torrents",
-    )
-    movies_path: Path | None = None
-    series_path: Path | None = None
 
     def __init__(self, **data):
         super().__init__(**data)
-        # Set derived paths
-        self.movies_path = self.library_path / "movies"
-        self.series_path = self.library_path / "series"
 
         # Create directories if they don't exist
         self.library_path.mkdir(parents=True, exist_ok=True)
-        self.download_path.mkdir(parents=True, exist_ok=True)
-        self.movies_path.mkdir(parents=True, exist_ok=True)
-        self.series_path.mkdir(parents=True, exist_ok=True)
 
 
 class MPVConfig(BaseModel):

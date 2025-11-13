@@ -102,7 +102,9 @@ class TorrentScreen(Screen):
 
             # If we should trigger a RuTracker search after auth
             if kwargs.get("trigger_rutracker_search") and existing_state.imdb_metadata:
-                asyncio.create_task(self._search_torrents(context, existing_state.imdb_metadata, "rutracker"))
+                asyncio.create_task(
+                    self._search_torrents(context, existing_state.imdb_metadata, "rutracker")
+                )
         else:
             # Start with provider selection view
             context.update_context(
