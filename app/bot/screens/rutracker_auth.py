@@ -57,24 +57,12 @@ class RuTrackerAuthScreen(Screen):
         """Called when entering the screen.
 
         Expects kwargs:
-            movie: IMDbMovie object (for back navigation)
-            movies: List of all movies (for back navigation)
-            detailed_movies: Dict of detailed movie data (for back navigation)
-            query: Search query (for back navigation)
-            page: Current page (for back navigation)
+            torrent_screen_state: State from the torrent screen (for back navigation)
         """
-        movie = kwargs.get("movie")
-        movies = kwargs.get("movies", [])
-        detailed_movies = kwargs.get("detailed_movies", {})
-        query = kwargs.get("query", "")
-        page = kwargs.get("page", 0)
+        torrent_screen_state = kwargs.get("torrent_screen_state")
 
         context.update_context(
-            movie=movie,
-            movies=movies,
-            detailed_movies=detailed_movies,
-            query=query,
-            page=page,
+            torrent_screen_state=torrent_screen_state,
         )
 
         # Start setup server in background if not already running
@@ -88,9 +76,6 @@ class RuTrackerAuthScreen(Screen):
 
     async def render(self, context: Context) -> ScreenRenderResult:
         """Render the RuTracker authorization screen."""
-        state = context.get_context()
-        movie = state.get("movie")
-
         # Check if credentials are already configured
         tracker_username = os.getenv("TRACKER_USERNAME")
         tracker_password = os.getenv("TRACKER_PASSWORD")
@@ -138,15 +123,15 @@ class RuTrackerAuthScreen(Screen):
         state = context.get_context()
 
         if query.data == RUTRACKER_AUTH_BACK:
-            # Navigate back to provider selection
-            return Navigation(
-                next_screen="torrent_providers",
-                movie=state.get("movie"),
-                movies=state.get("movies", []),
-                detailed_movies=state.get("detailed_movies", {}),
-                query=state.get("query", ""),
-                page=state.get("page", 0),
-            )
+            # Navigate back to torrent provider selection
+            torrent_screen_state = state.get("torrent_screen_state")
+            if torrent_screen_state:
+                return Navigation(
+                    next_screen="torrent",
+                    torrent_screen_state=torrent_screen_state,
+                )
+            # Fallback to main menu if no state
+            return Navigation(next_screen="main_menu")
 
         elif query.data == RUTRACKER_AUTH_CHECK:
             # Check if credentials have been loaded
@@ -179,17 +164,17 @@ class RuTrackerAuthScreen(Screen):
 
         elif query.data == "rutracker_auth:continue:":
             # Credentials are configured, proceed to search
-            movie = state.get("movie")
-            if movie:
+            torrent_screen_state = state.get("torrent_screen_state")
+            if torrent_screen_state and torrent_screen_state.imdb_metadata:
                 await query.answer("Searching RuTracker...", show_alert=False)
+                # Navigate back to torrent screen and trigger RuTracker search
+                # The torrent screen will handle the search when it detects credentials
                 return Navigation(
-                    next_screen="torrent_results",
-                    movie=movie,
-                    provider="rutracker",
-                    movies=state.get("movies", []),
-                    detailed_movies=state.get("detailed_movies", {}),
-                    query=state.get("query", ""),
-                    movie_page=state.get("page", 0),
+                    next_screen="torrent",
+                    torrent_screen_state=torrent_screen_state,
+                    trigger_rutracker_search=True,
                 )
+            # Fallback to main menu if no state
+            return Navigation(next_screen="main_menu")
 
         return None

@@ -1,6 +1,7 @@
 """Unified torrent screen for provider selection and results display."""
 
 import logging
+import os
 from dataclasses import dataclass, field
 
 from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
@@ -33,6 +34,8 @@ from app.library.models import (
 from app.torrent.downloader import TorrentDownloader
 from app.torrent.searcher import TorrentSearcher, TorrentSearchResult
 from app.torrent.validator import TorrentValidator
+
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -87,22 +90,29 @@ class TorrentScreen(Screen):
         """Called when entering the screen.
 
         Expects kwargs:
-            movie: IMDbTitle object
-            movies: List of all movies (for back navigation)
-            detailed_movies: Dict of detailed movie data (for back navigation)
-            query: Search query (for back navigation)
-            page: Current page (for back navigation)
-            series_imdb_id: Optional series IMDb ID (for episode downloads)
+            imdb_metadata: Download metadata object
+            movie_selection_state: State from movie selection screen
+            torrent_screen_state: Existing state (when returning from auth screen)
+            trigger_rutracker_search: Boolean to trigger RuTracker search on enter
         """
-        # Start with provider selection view
-        context.update_context(
-            **{
-                TORRENT_SCREEN_STATE: TorrentScreenState(
-                    imdb_metadata=kwargs.get("imdb_metadata"),
-                    movie_selection_state=kwargs.get("movie_selection_state"),
-                )
-            }
-        )
+        # Check if we're returning from auth screen with existing state
+        if "torrent_screen_state" in kwargs:
+            existing_state = kwargs["torrent_screen_state"]
+            context.update_context(**{TORRENT_SCREEN_STATE: existing_state})
+
+            # If we should trigger a RuTracker search after auth
+            if kwargs.get("trigger_rutracker_search") and existing_state.imdb_metadata:
+                asyncio.create_task(self._search_torrents(context, existing_state.imdb_metadata, "rutracker"))
+        else:
+            # Start with provider selection view
+            context.update_context(
+                **{
+                    TORRENT_SCREEN_STATE: TorrentScreenState(
+                        imdb_metadata=kwargs.get("imdb_metadata"),
+                        movie_selection_state=kwargs.get("movie_selection_state"),
+                    )
+                }
+            )
 
     async def render(self, context: Context) -> ScreenRenderResult:
         """Render the screen based on current view state."""
@@ -294,6 +304,19 @@ class TorrentScreen(Screen):
             provider = query.data[len(PROVIDER_SELECT) :]
 
             if state.imdb_metadata:
+                # Check if RuTracker credentials are needed
+                if provider == "rutracker":
+                    tracker_username = os.getenv("TRACKER_USERNAME")
+                    tracker_password = os.getenv("TRACKER_PASSWORD")
+
+                    if not tracker_username or not tracker_password:
+                        # Credentials missing - navigate to authorization screen
+                        await query.answer("RuTracker credentials required", show_alert=True)
+                        return Navigation(
+                            next_screen="rutracker_auth",
+                            torrent_screen_state=state,
+                        )
+
                 await query.answer(f"Searching {provider.upper()}...", show_alert=False)
                 await self._search_torrents(context, state.imdb_metadata, provider)
                 return

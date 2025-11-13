@@ -1165,7 +1165,7 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
     host_ip = _detect_local_ip()
     desired_port = 8766  # Different port from main setup
 
-    async def on_credentials_saved(username: str, password: str) -> tuple[bool, Optional[str]]:
+    async def on_credentials_saved(username: str, password: str) -> tuple[bool, str | None]:
         """Save credentials to .env file."""
         try:
             # Persist to .env at project root
