@@ -534,6 +534,72 @@ class MPVController:
             logger.error(f"Error cycling audio: {e}")
             return False
 
+    async def get_audio_tracks(self) -> list[dict[str, Any]]:
+        """Get list of available audio tracks.
+
+        Returns:
+            List of audio track dictionaries with id, title, lang, codec, etc.
+        """
+        if not self._player:
+            return []
+
+        try:
+            track_list = self._player.track_list
+            if not track_list:
+                return []
+
+            # Filter audio tracks
+            audio_tracks = []
+            for track in track_list:
+                if track.get("type") == "audio":
+                    audio_tracks.append({
+                        "id": track.get("id"),
+                        "title": track.get("title", ""),
+                        "lang": track.get("lang", ""),
+                        "codec": track.get("codec", ""),
+                        "selected": track.get("selected", False),
+                    })
+
+            return audio_tracks
+        except Exception as e:
+            logger.error(f"Error getting audio tracks: {e}")
+            return []
+
+    async def get_current_audio_track(self) -> int | None:
+        """Get current audio track ID.
+
+        Returns:
+            Current audio track ID or None
+        """
+        if not self._player:
+            return None
+
+        try:
+            aid = self._player.audio
+            return int(aid) if aid is not None else None
+        except Exception:
+            return None
+
+    async def set_audio_track(self, track_id: int) -> bool:
+        """Set audio track by ID.
+
+        Args:
+            track_id: Audio track ID
+
+        Returns:
+            True if successful
+        """
+        if not self._player:
+            return False
+
+        try:
+            self._player.audio = track_id
+            logger.info(f"Audio track set to {track_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting audio track: {e}")
+            return False
+
     async def get_position(self) -> float | None:
         """Get current playback position in seconds.
 
