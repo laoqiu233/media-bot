@@ -17,7 +17,6 @@ from app.library.models import (
     FileMatch,
     IMDbEpisode,
     MatchedTorrentFiles,
-    VideoQuality,
 )
 from app.torrent.file_utils import is_video_file, parse_episode_info
 from app.torrent.metadata_fetcher import TorrentMetadataFetcher
@@ -165,7 +164,7 @@ class TorrentValidator:
             warnings=warnings,
             has_all_requested_content=len(matched_files) > 0,
             download_metadata=download_movie,
-            total_files=len(files)
+            total_files=len(files),
         )
 
     async def _validate_series(
@@ -323,5 +322,5 @@ class TorrentValidator:
             missing_content=missing_content,
             warnings=warnings,
             download_metadata=download_imdb_metadata,
-            total_files=len(files)
+            total_files=len(files),
         )

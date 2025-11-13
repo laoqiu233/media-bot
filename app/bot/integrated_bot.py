@@ -76,18 +76,10 @@ async def initialize_components():
                 logger.warning(f"Download path not found for task {task_id}")
                 return
 
-            if not state.validation_result:
-                logger.error(f"No validation result for completed download: {task_id}")
-                return
-
-            if not state.metadata:
-                logger.error(f"No metadata for completed download: {task_id}")
-                return
-
             # Import using TorrentImporter with validation result
             await torrent_importer.import_download(
                 download_path=download_path,
-                metadata=state.metadata,
+                torrent=state.torrent,
                 validation_result=state.validation_result,
             )
 

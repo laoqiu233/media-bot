@@ -2,9 +2,8 @@
 
 import json
 import logging
-import re
+import os
 import shutil
-from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -12,20 +11,18 @@ import aiofiles
 
 from app.library.models import (
     DownloadedFile,
-    Genre,
-    IMDbEpisode,
-    IMDbSeason,
-    IMDbTitle,
     MediaEntity,
     MediaType,
     VideoQuality,
-    create_episode_entity,
-    create_movie_entity,
-    create_season_entity,
-    create_series_entity,
 )
+from app.torrent.file_utils import is_video_file
 
 logger = logging.getLogger(__name__)
+
+METADATA_FILE = "metadata.json"
+DOWNLOADED_FILES_DIR = "files"
+SEASONS_DIR = "seasons"
+EPISODES_DIR = "episodes"
 
 
 class LibraryManager:
@@ -45,7 +42,6 @@ class LibraryManager:
 
         # In-memory cache: imdb_id -> MediaEntity
         self._entities_cache: dict[str, MediaEntity] = {}
-        self._cache_loaded = False
 
     async def scan_library(self) -> tuple[int, int]:
         """Scan the library and load all media entities.
@@ -54,7 +50,6 @@ class LibraryManager:
             Tuple of (movies_count, series_count)
         """
         await self._scan_entities()
-        self._cache_loaded = True
 
         movies_count = sum(
             1 for e in self._entities_cache.values() if e.media_type == MediaType.MOVIE
@@ -65,6 +60,10 @@ class LibraryManager:
 
         return movies_count, series_count
 
+    def get_all_media_entities(self) -> list[MediaEntity]:
+        """Get all media entities from the library."""
+        return list(self._entities_cache.values())
+
     async def _scan_entities(self):
         """Scan media_entities directory and load all entities."""
         self._entities_cache.clear()
@@ -73,1110 +72,262 @@ class LibraryManager:
             if not entity_dir.is_dir():
                 continue
 
-            metadata_file = entity_dir / "metadata.json"
-            if not metadata_file.exists():
+            entity = await self._load_metadata(entity_dir)
+
+            if entity is None:
                 continue
 
-            try:
-                async with aiofiles.open(metadata_file, encoding="utf-8") as f:
-                    content = await f.read()
-                    data = json.loads(content)
+            if entity.media_type == MediaType.MOVIE:
+                await self._validate_downloaded_files(entity_dir, entity)
+            elif entity.media_type == MediaType.SERIES:
+                await self._scan_series(entity_dir, entity)
+            else:
+                logger.warning(
+                    f"Unexpected media type {entity.media_type} in media library root directory: {entity_dir}"
+                )
+                continue
 
-                    entity = MediaEntity(**data)
+            self._entities_cache[entity.imdb_id] = entity
 
-                    # Load downloaded files for movies
-                    if entity.media_type == MediaType.MOVIE:
-                        entity.downloaded_files = await self._load_downloaded_files(
-                            entity_dir / "files", entity.id
-                        )
-
-                    # Load seasons and episodes for series
-                    elif entity.media_type == MediaType.SERIES:
-                        await self._load_series_hierarchy(entity_dir, entity)
-
-                    self._entities_cache[entity.imdb_id] = entity
-
-            except Exception as e:
-                logger.error(f"Error loading entity from {metadata_file}: {e}")
-
-    async def _load_series_hierarchy(self, series_dir: Path, series: MediaEntity):
-        """Load seasons and episodes for a series.
-
-        Args:
-            series_dir: Path to series directory
-            series: Series MediaEntity
-        """
-        seasons_path = series_dir / "seasons"
-        if not seasons_path.exists():
+    async def _scan_series(self, entity_dir: Path, series_entity: MediaEntity):
+        """Scan series directory and load all seasons and episodes."""
+        seasons_dir = entity_dir / SEASONS_DIR
+        if not seasons_dir.exists():
+            logger.warning(f"No seasons directory found for series {series_entity.imdb_id}")
             return
 
-        for season_dir in seasons_path.iterdir():
-            if not season_dir.is_dir() or not season_dir.name.startswith("S"):
+        for season_dir in seasons_dir.iterdir():
+            if not season_dir.is_dir():
+                logger.warning(f"Skipping non-season directory: {season_dir}")
                 continue
 
-            # Extract season number (S01, S02, etc.)
-            season_match = re.match(r"S(\d+)", season_dir.name)
-            if not season_match:
+            season_entity = await self._load_metadata(season_dir)
+            if season_entity is None:
+                logger.warning(
+                    f"No season metadata found for season {season_dir} in series dir {entity_dir}"
+                )
                 continue
 
-            season_num = int(season_match.group(1))
-            season_metadata_file = season_dir / "metadata.json"
-
-            if season_metadata_file.exists():
-                try:
-                    async with aiofiles.open(season_metadata_file, encoding="utf-8") as f:
-                        content = await f.read()
-                        data = json.loads(content)
-                        season_entity = MediaEntity(**data)
-                        self._entities_cache[season_entity.imdb_id] = season_entity
-                except Exception as e:
-                    logger.error(f"Error loading season metadata: {e}")
-                    continue
-
-            # Load episodes for this season
-            episodes_path = season_dir / "episodes"
-            if episodes_path.exists():
-                await self._load_episodes(episodes_path, series.id, season_num)
-
-    async def _load_episodes(self, episodes_path: Path, series_id: str, season_num: int):
-        """Load episodes from episodes directory.
-
-        Args:
-            episodes_path: Path to episodes directory
-            series_id: Series ID
-            season_num: Season number
-        """
-        for episode_dir in episodes_path.iterdir():
-            if not episode_dir.is_dir() or not episode_dir.name.startswith("E"):
-                continue
-
-            # Extract episode number (E01, E02, etc.)
-            episode_match = re.match(r"E(\d+)", episode_dir.name)
-            if not episode_match:
-                continue
-
-            episode_metadata_file = episode_dir / "metadata.json"
-
-            if episode_metadata_file.exists():
-                try:
-                    async with aiofiles.open(episode_metadata_file, encoding="utf-8") as f:
-                        content = await f.read()
-                        data = json.loads(content)
-                        episode_entity = MediaEntity(**data)
-                        episode_entity.downloaded_files = await self._load_downloaded_files(
-                            episode_dir / "files", episode_entity.id
-                        )
-                        self._entities_cache[episode_entity.imdb_id] = episode_entity
-                except Exception as e:
-                    logger.error(f"Error loading episode metadata: {e}")
-
-    async def _load_downloaded_files(
-        self, files_dir: Path, media_entity_id: str, source: str | None = None
-    ) -> list[DownloadedFile]:
-        """Load downloaded files from files directory.
-
-        Args:
-            files_dir: Path to files directory
-            media_entity_id: MediaEntity ID
-
-        Returns:
-            List of DownloadedFile objects
-        """
-        files = []
-        if not files_dir.exists():
-            return files
-
-        for file_path in files_dir.iterdir():
-            if not file_path.is_file():
-                continue
-
-            # Check if it's a video file
-            if file_path.suffix.lower() not in [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv"]:
-                continue
-
-            # Create DownloadedFile
-            file_id = str(uuid4())
-            file_size = file_path.stat().st_size if file_path.exists() else None
-            quality = self._detect_quality(file_path.name)
-
-            downloaded_file = DownloadedFile(
-                id=file_id,
-                media_entity_id=media_entity_id,
-                file_path=file_path,
-                quality=quality,
-                file_size=file_size,
-                source=source,
-            )
-
-            files.append(downloaded_file)
-
-        return files
-
-    async def get_media_entity(self, imdb_id: str) -> MediaEntity | None:
-        """Get a media entity by IMDb ID.
-
-        Args:
-            imdb_id: IMDb ID
-
-        Returns:
-            MediaEntity or None
-        """
-        if not self._cache_loaded:
-            await self.scan_library()
-        return self._entities_cache.get(imdb_id)
-
-    async def get_media_entity_by_id(self, entity_id: str) -> MediaEntity | None:
-        """Get a media entity by internal ID.
-
-        Args:
-            entity_id: Entity ID (UUID)
-
-        Returns:
-            MediaEntity or None
-        """
-        if not self._cache_loaded:
-            await self.scan_library()
-
-        for entity in self._entities_cache.values():
-            if entity.id == entity_id:
-                return entity
-        return None
-
-    async def get_all_media_entities(
-        self, media_type: MediaType | None = None
-    ) -> list[MediaEntity]:
-        """Get all media entities, optionally filtered by type.
-
-        Args:
-            media_type: Optional media type filter
-
-        Returns:
-            List of MediaEntity objects
-        """
-        if not self._cache_loaded:
-            await self.scan_library()
-
-        entities = list(self._entities_cache.values())
-
-        if media_type:
-            entities = [e for e in entities if e.media_type == media_type]
-
-        return entities
-
-    async def get_series_seasons(self, series_id: str) -> list[MediaEntity]:
-        """Get all seasons for a series.
-
-        Args:
-            series_id: Series entity ID
-
-        Returns:
-            List of season MediaEntity objects
-        """
-        if not self._cache_loaded:
-            await self.scan_library()
-
-        series = await self.get_media_entity_by_id(series_id)
-        if not series or series.media_type != MediaType.SERIES:
-            return []
-
-        # Find all seasons for this series
-        seasons = []
-        for entity in self._entities_cache.values():
-            if entity.media_type == MediaType.SEASON and entity.series_id == series_id:
-                seasons.append(entity)
-
-        return sorted(seasons, key=lambda s: s.season_number or 0)
-
-    async def get_season_episodes(self, season_id: str) -> list[MediaEntity]:
-        """Get all episodes for a season.
-
-        Args:
-            season_id: Season entity ID
-
-        Returns:
-            List of episode MediaEntity objects
-        """
-        if not self._cache_loaded:
-            await self.scan_library()
-
-        season = await self.get_media_entity_by_id(season_id)
-        if not season or season.media_type != MediaType.SEASON:
-            return []
-
-        # Find all episodes for this season
-        episodes = []
-        for entity in self._entities_cache.values():
-            if entity.media_type == MediaType.EPISODE and entity.season_id == season_id:
-                episodes.append(entity)
-
-        return sorted(episodes, key=lambda e: e.episode_number or 0)
-
-    async def get_episode_by_number(
-        self, series_id: str, season_num: int, episode_num: int
-    ) -> MediaEntity | None:
-        """Get an episode by series, season, and episode number.
-
-        Args:
-            series_id: Series entity ID
-            season_num: Season number
-            episode_num: Episode number
-
-        Returns:
-            Episode MediaEntity or None
-        """
-        if not self._cache_loaded:
-            await self.scan_library()
-
-        for entity in self._entities_cache.values():
-            if (
-                entity.media_type == MediaType.EPISODE
-                and entity.series_id == series_id
-                and entity.season_number == season_num
-                and entity.episode_number == episode_num
-            ):
-                return entity
-
-        return None
-
-    async def create_media_entity(
-        self,
-        imdb_id: str,
-        title: str,
-        media_type: MediaType,
-        year: int | None = None,
-        genres: list[Genre] | None = None,
-        description: str | None = None,
-        poster_url: str | None = None,
-        rating: float | None = None,
-        **kwargs,
-    ) -> MediaEntity:
-        """Create a new media entity.
-
-        Args:
-            imdb_id: IMDb ID (primary identifier)
-            title: Title
-            media_type: Media type
-            year: Release year
-            genres: List of genres
-            description: Description
-            poster_url: Poster URL
-            rating: IMDb rating
-            **kwargs: Additional fields (director, cast, status, etc.)
-
-        Returns:
-            Created MediaEntity
-        """
-        entity_id = str(uuid4())
-        entity_dir = self.entities_path / imdb_id
-        entity_dir.mkdir(parents=True, exist_ok=True)
-
-        entity = MediaEntity(
-            id=entity_id,
-            imdb_id=imdb_id,
-            title=title,
-            media_type=media_type,
-            year=year,
-            genres=genres or [],
-            description=description,
-            poster_url=poster_url,
-            rating=rating,
-            **kwargs,
-        )
-
-        await self._save_entity_metadata(entity)
-        self._entities_cache[imdb_id] = entity
-
-        return entity
-
-    async def add_season(
-        self, series_id: str, season_number: int, imdb_id: str | None = None, **kwargs
-    ) -> MediaEntity:
-        """Add a season to a series.
-
-        Args:
-            series_id: Series entity ID
-            season_number: Season number
-            imdb_id: Optional IMDb ID for season (if not provided, generates one)
-
-        Returns:
-            Created season MediaEntity
-        """
-        series = await self.get_media_entity_by_id(series_id)
-        if not series or series.media_type != MediaType.SERIES:
-            raise ValueError(f"Series not found: {series_id}")
-
-        if not imdb_id:
-            # Generate IMDb ID: series_imdb_id_S{season_num}
-            imdb_id = f"{series.imdb_id}_S{season_number:02d}"
-
-        season_id = str(uuid4())
-        series_dir = self.entities_path / series.imdb_id
-        season_dir = series_dir / "seasons" / f"S{season_number:02d}"
-        season_dir.mkdir(parents=True, exist_ok=True)
-
-        season = MediaEntity(
-            id=season_id,
-            imdb_id=imdb_id,
-            title=f"{series.title} - Season {season_number}",
-            media_type=MediaType.SEASON,
-            series_id=series_id,
-            season_number=season_number,
-            year=series.year,
-            genres=series.genres,
-            **kwargs,
-        )
-
-        await self._save_entity_metadata(season, season_dir / "metadata.json")
-        self._entities_cache[imdb_id] = season
-
-        return season
-
-    async def add_episode(
-        self,
-        season_id: str,
-        episode_number: int,
-        episode_title: str | None = None,
-        air_date: datetime | None = None,
-        imdb_id: str | None = None,
-        **kwargs,
-    ) -> MediaEntity:
-        """Add an episode to a season.
-
-        Args:
-            season_id: Season entity ID
-            episode_number: Episode number
-            episode_title: Episode title
-            air_date: Air date
-            imdb_id: Optional IMDb ID for episode
-
-        Returns:
-            Created episode MediaEntity
-        """
-        season = await self.get_media_entity_by_id(season_id)
-        if not season or season.media_type != MediaType.SEASON:
-            raise ValueError(f"Season not found: {season_id}")
-
-        series = await self.get_media_entity_by_id(season.series_id or "")
-        if not series:
-            raise ValueError(f"Series not found for season: {season_id}")
-
-        if not imdb_id:
-            # Generate IMDb ID: series_imdb_id_S{season_num}E{episode_num}
-            imdb_id = f"{series.imdb_id}_S{season.season_number:02d}E{episode_number:02d}"
-
-        episode_id = str(uuid4())
-        season_dir = (
-            self.entities_path / series.imdb_id / "seasons" / f"S{season.season_number:02d}"
-        )
-        episode_dir = season_dir / "episodes" / f"E{episode_number:02d}"
-        episode_dir.mkdir(parents=True, exist_ok=True)
-
-        episode = MediaEntity(
-            id=episode_id,
-            imdb_id=imdb_id,
-            title=episode_title
-            or f"{series.title} S{season.season_number:02d}E{episode_number:02d}",
-            media_type=MediaType.EPISODE,
-            series_id=series.id,
-            season_id=season_id,
-            season_number=season.season_number,
-            episode_number=episode_number,
-            episode_title=episode_title,
-            air_date=air_date,
-            year=series.year,
-            genres=series.genres,
-            **kwargs,
-        )
-
-        await self._save_entity_metadata(episode, episode_dir / "metadata.json")
-        self._entities_cache[imdb_id] = episode
-
-        return episode
-
-    async def add_downloaded_file(
-        self,
-        media_entity_id: str,
-        file_path: Path,
-        source: str | None = None,
-        quality: VideoQuality | None = None,
-    ) -> DownloadedFile:
-        """Add a downloaded file to a media entity.
-
-        Args:
-            media_entity_id: MediaEntity ID
-            file_path: Path to the video file
-            source: Source torrent name
-            quality: Video quality (auto-detected if not provided)
-
-        Returns:
-            Created DownloadedFile
-        """
-        entity = await self.get_media_entity_by_id(media_entity_id)
-        if not entity:
-            raise ValueError(f"MediaEntity not found: {media_entity_id}")
-
-        # Determine target directory based on entity type
-        if entity.media_type == MediaType.MOVIE:
-            target_dir = self.entities_path / entity.imdb_id / "files"
-        elif entity.media_type == MediaType.EPISODE:
-            series = await self.get_media_entity_by_id(entity.series_id or "")
-            if not series:
-                raise ValueError(f"Series not found for episode: {media_entity_id}")
-
-            season = await self.get_media_entity_by_id(entity.season_id or "")
-            if not season:
-                raise ValueError(f"Season not found for episode: {media_entity_id}")
-
-            target_dir = (
-                self.entities_path
-                / series.imdb_id
-                / "seasons"
-                / f"S{season.season_number:02d}"
-                / "episodes"
-                / f"E{entity.episode_number:02d}"
-                / "files"
-            )
-        else:
-            raise ValueError(f"Cannot add files to entity type: {entity.media_type}")
-
-        target_dir.mkdir(parents=True, exist_ok=True)
-
-        # Move file to target directory
-        target_file = target_dir / file_path.name
-        if file_path != target_file and file_path.exists():
-            try:
-                shutil.move(str(file_path), str(target_file))
-                logger.info(f"Moved {file_path.name} to library at {target_file}")
-            except Exception as e:
-                logger.error(f"Error moving file to library: {e}")
-                target_file = file_path
-
-        # Detect quality if not provided
-        if quality is None:
-            quality = self._detect_quality(file_path.name)
-
-        # Get file size
-        file_size = target_file.stat().st_size if target_file.exists() else None
-
-        # Create DownloadedFile
-        file_id = str(uuid4())
-        downloaded_file = DownloadedFile(
-            id=file_id,
-            media_entity_id=media_entity_id,
-            file_path=target_file,
-            quality=quality,
-            file_size=file_size,
-            source=source,
-        )
-
-        # Add to entity
-        entity.downloaded_files.append(downloaded_file)
-        await self._save_entity_metadata(entity)
-
-        return downloaded_file
-
-    async def _save_entity_metadata(self, entity: MediaEntity, metadata_file: Path | None = None):
-        """Save entity metadata to JSON file.
-
-        Args:
-            entity: MediaEntity to save
-            metadata_file: Optional custom path (defaults to entity_dir/metadata.json)
-        """
-        if metadata_file is None:
-            entity_dir = self.entities_path / entity.imdb_id
-            metadata_file = entity_dir / "metadata.json"
-
-        metadata_file.parent.mkdir(parents=True, exist_ok=True)
-
-        data = entity.model_dump(mode="json")
-        # Convert Path objects to strings
-        if "downloaded_files" in data:
-            for file_data in data["downloaded_files"]:
-                if "file_path" in file_data:
-                    file_data["file_path"] = str(file_data["file_path"])
-
-        async with aiofiles.open(metadata_file, "w", encoding="utf-8") as f:
-            await f.write(json.dumps(data, indent=2, ensure_ascii=False))
-
-    def _find_video_file(self, directory: Path) -> Path | None:
-        """Find the first video file in a directory.
-
-        Args:
-            directory: Directory to search
-
-        Returns:
-            Path to video file or None
-        """
-        video_extensions = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv"}
-        for file in directory.iterdir():
-            if file.is_file() and file.suffix.lower() in video_extensions:
-                return file
-        return None
-
-    def _detect_quality(self, filename: str) -> VideoQuality:
-        """Detect video quality from filename.
-
-        Args:
-            filename: Filename to analyze
-
-        Returns:
-            VideoQuality enum value
-        """
-        filename_lower = filename.lower()
-        if "2160p" in filename_lower or "4k" in filename_lower:
-            return VideoQuality.UHD_4K
-        elif "1080p" in filename_lower:
-            return VideoQuality.HD_1080
-        elif "720p" in filename_lower:
-            return VideoQuality.HD_720
-        elif "480p" in filename_lower or "sd" in filename_lower:
-            return VideoQuality.SD
-        return VideoQuality.UNKNOWN
-
-    async def import_from_download(
-        self, download_path: Path, torrent_name: str, metadata: dict | None = None
-    ) -> MediaEntity | None:
-        """Import a completed download into the library.
-
-        Args:
-            download_path: Path to the downloaded file/folder
-            torrent_name: Name of the torrent
-            metadata: Optional metadata dict from IMDb (includes imdb_id, title, year, etc.)
-
-        Returns:
-            MediaEntity if successfully imported, None otherwise
-        """
-        try:
-            # Find the video file
-            if download_path.is_file():
-                video_file = download_path
-            elif download_path.is_dir():
-                video_file = self._find_video_file(download_path)
-                if not video_file:
-                    logger.error(f"No video file found in {download_path}")
-                    return None
+            if season_entity.media_type == MediaType.SEASON:
+                await self._scan_season(season_dir, season_entity)
+                self._entities_cache[season_entity.imdb_id] = season_entity
             else:
-                logger.error(f"Download path does not exist: {download_path}")
-                return None
-
-            # Check if this is a series episode by filename pattern
-            episode_match = self._parse_episode_filename(video_file.name)
-            if episode_match:
-                return await self._import_episode_download(
-                    video_file, torrent_name, episode_match, metadata
+                logger.warning(
+                    f"Unexpected media type {season_entity.media_type} in season directory: {season_dir}"
                 )
 
-            # Otherwise, treat as movie
-            return await self._import_movie_download(video_file, torrent_name, metadata)
+    async def _scan_season(self, entity_dir: Path, season_entity: MediaEntity):
+        """Scan season directory and load all episodes."""
+        episodes_dir = entity_dir / EPISODES_DIR
+        if not episodes_dir.exists():
+            logger.warning(f"No episodes directory found for season {season_entity.imdb_id}")
+            return
 
-        except Exception as e:
-            logger.error(f"Error importing download to library: {e}", exc_info=True)
+        for episode_dir in episodes_dir.iterdir():
+            if not episode_dir.is_dir():
+                logger.warning(f"Skipping non-episode directory: {episode_dir}")
+                continue
+
+            episode_entity = await self._load_metadata(episode_dir)
+            if episode_entity is None:
+                logger.warning(
+                    f"No episode metadata found for episode {episode_dir} in season dir {entity_dir}"
+                )
+                continue
+
+            if episode_entity.media_type == MediaType.EPISODE:
+                await self._validate_downloaded_files(episode_dir, episode_entity)
+                self._entities_cache[episode_entity.imdb_id] = episode_entity
+            else:
+                logger.warning(
+                    f"Unexpected media type {episode_entity.media_type} in episode directory: {episode_dir}"
+                )
+
+    async def _validate_downloaded_files(self, entity_dir: Path, entity: MediaEntity):
+        """Validate downloaded files for an entity."""
+        files_dir = entity_dir / DOWNLOADED_FILES_DIR
+        if not files_dir.exists():
+            entity.downloaded_files = []
+            await self._save_metadata(entity_dir, entity)
+            return
+
+        expected_files = {file.file_name: file for file in entity.downloaded_files}
+        actual_files: list[DownloadedFile] = []
+
+        for file_path in files_dir.iterdir():
+            if not file_path.is_file() or not is_video_file(file_path.name):
+                logger.warning(f"Skipping non-video file: {file_path}")
+                continue
+            if file_path.name not in expected_files:
+                logger.warning(f"Found unexpected file: {file_path}, adding to the library")
+                actual_files.append(
+                    DownloadedFile(
+                        id=str(uuid4()),
+                        media_entity_id=entity.imdb_id,
+                        file_name=file_path.name,
+                        quality=VideoQuality.UNKNOWN,
+                        file_size=file_path.stat().st_size,
+                        source=None,
+                    )
+                )
+                continue
+            actual_files.append(expected_files[file_path.name])
+
+        entity.downloaded_files = actual_files
+        await self._save_metadata(entity_dir, entity)
+
+    async def get_entity(self, imdb_id: str) -> MediaEntity | None:
+        """Get an entity from the library."""
+        if imdb_id not in self._entities_cache:
             return None
+        return self._entities_cache[imdb_id]
 
-    def _parse_episode_filename(self, filename: str) -> dict | None:
-        """Parse episode information from filename.
+    async def delete_entity(self, entity_id: str, delete_parent: bool) -> str | None:
+        entity = await self.get_entity(entity_id)
+        if entity is None:
+            raise ValueError(f"Entity {entity_id} not found in library")
+        entity_dir = self._get_entity_dir(entity)
+        shutil.rmtree(entity_dir)
+        del self._entities_cache[entity_id]
+        children = await self.get_child_entities(entity)
 
-        Args:
-            filename: Filename to parse
+        for child in children:
+            await self.delete_entity(child.imdb_id, False)
 
-        Returns:
-            Dict with season_num and episode_num, or None if not an episode
-        """
-        # Common patterns: S01E01, s01e01, S1E1, 1x01, etc.
-        patterns = [
-            r"[Ss](\d+)[Ee](\d+)",  # S01E01
-            r"(\d+)[Xx](\d+)",  # 1x01
-            r"Season\s+(\d+).*Episode\s+(\d+)",  # Season 1 Episode 1
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, filename)
-            if match:
-                return {"season_num": int(match.group(1)), "episode_num": int(match.group(2))}
-
+        parent = await self.get_parent_entity(entity)
+        if parent is not None and delete_parent:
+            siblings = await self.get_child_entities(parent)
+            if len(siblings) == 0:
+                return await self.delete_entity(parent.imdb_id, True)
+            return parent.imdb_id
         return None
 
-    async def _import_movie_download(
-        self, video_file: Path, torrent_name: str, metadata: dict | None
-    ) -> MediaEntity | None:
-        """Import a movie download.
+    async def delete_file(self, entity_id: str, file_id: str) -> str | None:
+        entity = await self.get_entity(entity_id)
+        if entity is None:
+            raise ValueError(f"Entity {entity_id} not found in library")
+        file = next((f for f in entity.downloaded_files if f.id == file_id), None)
+        if file is None:
+            raise ValueError(f"File {file_id} not found in entity {entity_id}")
+        entity_dir = self._get_entity_dir(entity)
+        file_path = entity_dir / DOWNLOADED_FILES_DIR / file.file_name
+        os.remove(file_path)
+        entity.downloaded_files.remove(file)
+        await self._save_metadata(entity_dir, entity)
 
-        Args:
-            video_file: Path to video file
-            torrent_name: Torrent name
-            metadata: Optional metadata
+        if entity.downloaded_files == []:
+            return await self.delete_entity(entity_id, True)
+        return entity_id
 
-        Returns:
-            MediaEntity or None
-        """
-        # Extract metadata
-        if metadata:
-            imdb_id = metadata.get("imdb_id")
-            title = metadata.get("title", torrent_name)
-            year = metadata.get("year")
-            genres = metadata.get("genres", [])
-            description = metadata.get("description")
-            rating = metadata.get("rating")
-            director = metadata.get("director")
-            cast = metadata.get("cast", [])
-            poster_url = metadata.get("poster_url")
-            quality_str = metadata.get("quality")
-        else:
-            # Parse from torrent name
-            imdb_id = None
-            title = torrent_name
-            year = None
-            genres = []
-            description = None
-            rating = None
-            director = None
-            cast = []
-            poster_url = None
-            quality_str = None
+    async def get_parent_entity(self, entity: MediaEntity) -> MediaEntity | None:
+        if entity.media_type == MediaType.SEASON and entity.series_id is not None:
+            return await self.get_entity(entity.series_id)
+        elif entity.media_type == MediaType.EPISODE and entity.season_id is not None:
+            return await self.get_entity(entity.season_id)
+        return None
 
-            # Try to extract year
-            year_match = re.search(r"\((\d{4})\)|\b(\d{4})\b", torrent_name)
-            if year_match:
-                year = int(year_match.group(1) or year_match.group(2))
+    async def get_child_entities(self, parent_entity: MediaEntity) -> list[MediaEntity]:
+        """Get all child entities of a parent entity."""
+        if parent_entity.media_type == MediaType.SERIES:
+            entities = [
+                e
+                for e in self._entities_cache.values()
+                if e.series_id == parent_entity.imdb_id and e.media_type == MediaType.SEASON
+            ]
+            entities.sort(key=lambda e: e.imdb_id)
+            return entities
+        elif parent_entity.media_type == MediaType.SEASON:
+            entities = [
+                e
+                for e in self._entities_cache.values()
+                if e.season_id == parent_entity.imdb_id and e.media_type == MediaType.EPISODE
+            ]
+            entities.sort(key=lambda e: e.episode_number or 0, reverse=True)
+            return entities
+        return []
 
-            # Clean title
-            title = re.sub(r"\((\d{4})\)", "", title)
-            title = re.sub(r"\[.*?\]", "", title)
-            title = re.sub(
-                r"\.(720p|1080p|2160p|BluRay|WEB-DL|HDTV).*", "", title, flags=re.IGNORECASE
-            )
-            title = title.replace(".", " ").replace("_", " ")
-            title = re.sub(r"\s+", " ", title).strip()
+    async def create_or_update_entity(self, entity: MediaEntity):
+        """Create a new entity in the library."""
 
-        if not imdb_id:
-            logger.warning(f"No IMDb ID for movie: {title}, skipping import")
-            return None
+        entity_dir = self._get_entity_dir(entity)
 
-        # Convert genres
-        parsed_genres = []
-        if genres:
-            for genre_str in genres:
-                try:
-                    genre_upper = genre_str.upper().replace("-", "")
-                    if genre_upper in Genre.__members__:
-                        parsed_genres.append(Genre[genre_upper])
-                    elif genre_str.lower() in [g.value for g in Genre]:
-                        parsed_genres.append(Genre(genre_str.lower()))
-                    else:
-                        parsed_genres.append(Genre.OTHER)
-                except (KeyError, ValueError):
-                    parsed_genres.append(Genre.OTHER)
+        if entity.media_type == MediaType.MOVIE or entity.media_type == MediaType.SERIES:
+            if entity.imdb_id not in self._entities_cache:
+                entity_dir.mkdir(parents=True, exist_ok=True)
 
-        # Convert quality
-        quality = VideoQuality.UNKNOWN
-        if quality_str:
-            try:
-                quality = VideoQuality(quality_str)
-            except ValueError:
-                quality = self._detect_quality(torrent_name)
-        else:
-            quality = self._detect_quality(torrent_name)
+        elif entity.media_type == MediaType.SEASON:
+            if entity.series_id not in self._entities_cache:
+                raise ValueError(f"Parent series {entity.series_id} not found in library")
+            if entity.imdb_id not in self._entities_cache:
+                entity_dir.mkdir(parents=True, exist_ok=True)
 
-        # Check if entity exists
-        entity = await self.get_media_entity(imdb_id)
-        if not entity:
-            # Create new entity
-            entity = await self.create_media_entity(
-                imdb_id=imdb_id,
-                title=title,
-                media_type=MediaType.MOVIE,
-                year=year,
-                genres=parsed_genres,
-                description=description,
-                poster_url=poster_url,
-                rating=rating,
-                director=director,
-                cast=cast,
-            )
+        elif entity.media_type == MediaType.EPISODE:
+            if entity.series_id not in self._entities_cache:
+                raise ValueError(f"Parent series {entity.series_id} not found in library")
+            if entity.season_id not in self._entities_cache:
+                raise ValueError(f"Parent season {entity.season_id} not found in library")
+            if entity.imdb_id not in self._entities_cache:
+                entity_dir.mkdir(parents=True, exist_ok=True)
 
-        # Add downloaded file
-        await self.add_downloaded_file(
-            media_entity_id=entity.id,
-            file_path=video_file,
-            source=torrent_name,
-            quality=quality,
-        )
+        self._entities_cache[entity.imdb_id] = entity
+        await self._save_metadata(entity_dir, entity)
 
-        logger.info(f"Successfully imported movie: {entity.title}")
-        return entity
+    def get_media_file_path(self, entity: MediaEntity, file_id: str) -> Path:
+        """Get the path to a media file."""
+        file = next((f for f in entity.downloaded_files if f.id == file_id), None)
+        if file is None:
+            raise ValueError(f"File {file_id} not found in entity {entity.imdb_id}")
+        return self._get_entity_dir(entity) / DOWNLOADED_FILES_DIR / file.file_name
 
-    async def _import_episode_download(
-        self,
-        video_file: Path,
-        torrent_name: str,
-        episode_match: dict,
-        metadata: dict | None,
-    ) -> MediaEntity | None:
-        """Import an episode download.
+    async def _add_downloaded_file(
+        self, entity: MediaEntity, downloaded_file: DownloadedFile, from_path: Path
+    ):
+        """Add a downloaded file to an entity."""
+        if entity.imdb_id not in self._entities_cache:
+            raise ValueError(f"Entity {entity.imdb_id} not found in library")
+        entity.downloaded_files.append(downloaded_file)
+        downloaded_files_dir = self._get_entity_dir(entity) / DOWNLOADED_FILES_DIR
+        downloaded_files_dir.mkdir(parents=True, exist_ok=True)
+        shutil.move(from_path, downloaded_files_dir / downloaded_file.file_name)
+        await self._save_metadata(self._get_entity_dir(entity), entity)
 
-        Args:
-            video_file: Path to video file
-            torrent_name: Torrent name
-            episode_match: Parsed episode info (season_num, episode_num)
-            metadata: Optional metadata
-
-        Returns:
-            MediaEntity or None
-        """
-        # For now, we need series imdb_id from metadata or user will need to match manually
-        # This is a limitation - we'll improve this later
-        if not metadata or not metadata.get("series_imdb_id"):
-            logger.warning(
-                f"Episode download detected but no series_imdb_id in metadata: {torrent_name}"
-            )
-            return None
-
-        series_imdb_id = metadata.get("series_imdb_id")
-        if not series_imdb_id or not isinstance(series_imdb_id, str):
-            logger.warning(f"Invalid or missing series_imdb_id in metadata for {video_file}")
-            return None
-
-        season_num = episode_match["season_num"]
-        episode_num = episode_match["episode_num"]
-
-        # Get or create series
-        series = await self.get_media_entity(series_imdb_id)
-        if not series:
-            logger.warning(f"Series not found: {series_imdb_id}, cannot import episode")
-            return None
-
-        # Get or create season
-        seasons = await self.get_series_seasons(series.id)
-        season = next((s for s in seasons if s.season_number == season_num), None)
-
-        if not season:
-            season = await self.add_season(series.id, season_num)
-
-        # Get or create episode
-        episode = await self.get_episode_by_number(series.id, season_num, episode_num)
-        if not episode:
-            episode = await self.add_episode(
-                season.id,
-                episode_num,
-                episode_title=metadata.get("episode_title") if metadata else None,
+    def _get_entity_dir(self, entity: MediaEntity) -> Path:
+        """Get the directory for an entity."""
+        if entity.media_type == MediaType.MOVIE or entity.media_type == MediaType.SERIES:
+            return self.entities_path / entity.imdb_id
+        elif entity.media_type == MediaType.SEASON:
+            if entity.series_id is None:
+                raise ValueError(f"Series ID is required for season entity: {entity.imdb_id}")
+            return self.entities_path / entity.series_id / SEASONS_DIR / entity.imdb_id
+        elif entity.media_type == MediaType.EPISODE:
+            if entity.series_id is None:
+                raise ValueError(f"Series ID is required for episode entity: {entity.imdb_id}")
+            if entity.season_id is None:
+                raise ValueError(f"Season ID is required for episode entity: {entity.imdb_id}")
+            return (
+                self.entities_path
+                / entity.series_id
+                / SEASONS_DIR
+                / entity.season_id
+                / EPISODES_DIR
+                / entity.imdb_id
             )
 
-        # Add downloaded file
-        quality = self._detect_quality(video_file.name)
-        await self.add_downloaded_file(
-            media_entity_id=episode.id,
-            file_path=video_file,
-            source=torrent_name,
-            quality=quality,
-        )
-
-        logger.info(
-            f"Successfully imported episode: {series.title} S{season_num:02d}E{episode_num:02d}"
-        )
-        return episode
-
-    async def get_or_create_series_entity(self, imdb_title: IMDbTitle) -> MediaEntity:
-        """Get existing series entity or create a new one.
-
-        Args:
-            imdb_title: IMDb title object for the series
-
-        Returns:
-            Series MediaEntity
-        """
-        # Check if already exists
-        entity = await self.get_media_entity(imdb_title.id)
-        if entity and entity.media_type == MediaType.SERIES:
-            return entity
-
-        # Create new series entity
-        series_entity = create_series_entity(imdb_title)
-
-        # Save to library
-        entity_dir = self.entities_path / series_entity.imdb_id
-        entity_dir.mkdir(parents=True, exist_ok=True)
-        await self._save_entity_metadata(series_entity)
-
-        # Add to cache
-        self._entities_cache[series_entity.imdb_id] = series_entity
-
-        logger.info(f"Created series entity: {series_entity.title}")
-        return series_entity
-
-    async def get_or_create_season_entity(
-        self, series_imdb_id: str, imdb_season: IMDbSeason
-    ) -> MediaEntity:
-        """Get existing season entity or create a new one.
-
-        Args:
-            series_imdb_id: IMDb ID of the parent series
-            imdb_season: IMDb season object
-
-        Returns:
-            Season MediaEntity
-        """
-        # Get series entity
-        series = await self.get_media_entity(series_imdb_id)
-        if not series:
-            raise ValueError(f"Series not found: {series_imdb_id}")
-
-        # Generate season IMDb ID
-        season_imdb_id = f"{series_imdb_id}_S{imdb_season.season}"
-
-        # Check if already exists
-        entity = await self.get_media_entity(season_imdb_id)
-        if entity and entity.media_type == MediaType.SEASON:
-            return entity
-
-        # Create new season entity
-        season_entity = create_season_entity(series, imdb_season)
-
-        # Save to library
-        series_dir = self.entities_path / series_imdb_id
-        season_dir = series_dir / "seasons" / f"S{imdb_season.season.zfill(2)}"
-        season_dir.mkdir(parents=True, exist_ok=True)
-        await self._save_entity_metadata(season_entity, season_dir / "metadata.json")
-
-        # Add to cache
-        self._entities_cache[season_entity.imdb_id] = season_entity
-
-        logger.info(f"Created season entity: {season_entity.title}")
-        return season_entity
-
-    async def get_or_create_episode_entity(
-        self, season_imdb_id: str, imdb_episode: IMDbEpisode, imdb_title: IMDbTitle
-    ) -> MediaEntity:
-        """Get existing episode entity or create a new one.
-
-        Args:
-            season_imdb_id: IMDb ID of the parent season
-            imdb_episode: IMDb episode object (basic info)
-            imdb_title: IMDb title object for the episode (detailed info)
-
-        Returns:
-            Episode MediaEntity
-        """
-        # Check if already exists
-        entity = await self.get_media_entity(imdb_episode.id)
-        if entity and entity.media_type == MediaType.EPISODE:
-            return entity
-
-        # Get season and series
-        season = await self.get_media_entity(season_imdb_id)
-        if not season or season.media_type != MediaType.SEASON:
-            raise ValueError(f"Season not found: {season_imdb_id}")
-
-        series = await self.get_media_entity(season.series_id)
-        if not series:
-            raise ValueError(f"Series not found: {season.series_id}")
-
-        # Create new episode entity
-        episode_entity = create_episode_entity(series, season, imdb_episode, imdb_title)
-
-        # Save to library
-        series_dir = self.entities_path / series.imdb_id
-        season_num_str = imdb_episode.season if imdb_episode.season else "00"
-        episode_num_str = (
-            str(imdb_episode.episodeNumber).zfill(2) if imdb_episode.episodeNumber else "00"
-        )
-
-        episode_dir = (
-            series_dir
-            / "seasons"
-            / f"S{season_num_str.zfill(2)}"
-            / "episodes"
-            / f"E{episode_num_str}"
-        )
-        episode_dir.mkdir(parents=True, exist_ok=True)
-        await self._save_entity_metadata(episode_entity, episode_dir / "metadata.json")
-
-        # Add to cache
-        self._entities_cache[episode_entity.imdb_id] = episode_entity
-
-        logger.info(f"Created episode entity: {episode_entity.title}")
-        return episode_entity
-
-    async def search(
-        self,
-        query: str,
-        media_type: MediaType | None = None,
-        genre: Genre | None = None,
-    ) -> list[MediaEntity]:
-        """Search for media entities.
-
-        Args:
-            query: Search query
-            media_type: Filter by media type
-            genre: Filter by genre
-
-        Returns:
-            List of matching MediaEntity objects
-        """
-        if not self._cache_loaded:
-            await self.scan_library()
-
-        results = []
-        query_lower = query.lower()
-
-        entities = await self.get_all_media_entities(media_type)
-
-        for entity in entities:
-            # Check title match
-            if query_lower not in entity.title.lower():
-                continue
-
-            # Check genre match
-            if genre and genre not in entity.genres:
-                continue
-
-            results.append(entity)
-
-        return results
-
-    async def get_or_create_movie_entity(self, imdb_title) -> MediaEntity:
-        """Get or create a movie entity from IMDb title.
-
-        Args:
-            imdb_title: IMDbTitle object
-
-        Returns:
-            MediaEntity for the movie
-        """
-        from app.library.models import create_movie_entity
-
-        # Check if exists
-        entity = await self.get_media_entity(imdb_title.id)
-        if entity:
-            return entity
-
-        # Create new entity
-        entity = create_movie_entity(imdb_title)
-
-        # Save to library
-        entity_dir = self.entities_path / entity.imdb_id
-        entity_dir.mkdir(parents=True, exist_ok=True)
-
-        await self._save_entity_metadata(entity)
-        self._entities_cache[entity.imdb_id] = entity
-
-        logger.info(f"Created movie entity: {entity.title}")
-        return entity
-
-    async def get_or_create_series_entity(self, imdb_title) -> MediaEntity:
-        """Get or create a series entity from IMDb title.
-
-        Args:
-            imdb_title: IMDbTitle object (should be a series)
-
-        Returns:
-            MediaEntity for the series
-        """
-        from app.library.models import create_series_entity
-
-        # Check if exists
-        entity = await self.get_media_entity(imdb_title.id)
-        if entity:
-            return entity
-
-        # Create new entity
-        entity = create_series_entity(imdb_title)
-
-        # Save to library
-        entity_dir = self.entities_path / entity.imdb_id
-        entity_dir.mkdir(parents=True, exist_ok=True)
-
-        await self._save_entity_metadata(entity)
-        self._entities_cache[entity.imdb_id] = entity
-
-        logger.info(f"Created series entity: {entity.title}")
-        return entity
-
-    async def get_or_create_season_entity(self, series_imdb_id: str, imdb_season) -> MediaEntity:
-        """Get or create a season entity.
-
-        Args:
-            series_imdb_id: Series IMDb ID
-            imdb_season: IMDbSeason object
-
-        Returns:
-            MediaEntity for the season
-        """
-        from app.library.models import create_season_entity
-
-        # Generate season imdb_id
-        season_imdb_id = f"{series_imdb_id}_S{imdb_season.season}"
-
-        # Check if exists
-        entity = await self.get_media_entity(season_imdb_id)
-        if entity:
-            return entity
-
-        # Get series entity
-        series = await self.get_media_entity(series_imdb_id)
-        if not series:
-            raise ValueError(f"Series not found: {series_imdb_id}")
-
-        # Create new season entity
-        entity = create_season_entity(series, imdb_season)
-
-        # Save to library
-        series_dir = self.entities_path / series_imdb_id
-        season_dir = series_dir / "seasons" / f"S{imdb_season.season.zfill(2)}"
-        season_dir.mkdir(parents=True, exist_ok=True)
-
-        await self._save_entity_metadata(entity, season_dir / "metadata.json")
-        self._entities_cache[entity.imdb_id] = entity
-
-        logger.info(f"Created season entity: {entity.title}")
-        return entity
-
-    async def get_or_create_episode_entity(
-        self, season_imdb_id: str, imdb_episode, imdb_title
-    ) -> MediaEntity:
-        """Get or create an episode entity.
-
-        Args:
-            season_imdb_id: Season IMDb ID
-            imdb_episode: IMDbEpisode object (basic info)
-            imdb_title: IMDbTitle object (full episode details)
-
-        Returns:
-            MediaEntity for the episode
-        """
-        from app.library.models import create_episode_entity
-
-        # Check if exists
-        entity = await self.get_media_entity(imdb_episode.id)
-        if entity:
-            return entity
-
-        # Get season entity
-        season = await self.get_media_entity(season_imdb_id)
-        if not season or season.media_type != MediaType.SEASON:
-            raise ValueError(f"Season not found: {season_imdb_id}")
-
-        # Get series entity
-        series = await self.get_media_entity(season.series_id)
-        if not series:
-            raise ValueError(f"Series not found: {season.series_id}")
-
-        # Create new episode entity
-        entity = create_episode_entity(series, season, imdb_episode, imdb_title)
-
-        # Save to library
-        series_dir = self.entities_path / series.imdb_id
-        season_num_padded = str(imdb_episode.season).zfill(2) if imdb_episode.season else "00"
-        episode_num_padded = (
-            str(imdb_episode.episodeNumber).zfill(2) if imdb_episode.episodeNumber else "00"
-        )
-
-        episode_dir = (
-            series_dir / "seasons" / f"S{season_num_padded}" / "episodes" / f"E{episode_num_padded}"
-        )
-        episode_dir.mkdir(parents=True, exist_ok=True)
-
-        await self._save_entity_metadata(entity, episode_dir / "metadata.json")
-        self._entities_cache[entity.imdb_id] = entity
-
-        logger.info(f"Created episode entity: {entity.title}")
-        return entity
+        raise ValueError(f"Unexpected media type {entity.media_type} in library")
+
+    async def _load_metadata(self, entity_dir: Path) -> MediaEntity | None:
+        """Load metadata from metadata directory."""
+        metadata_file = entity_dir / METADATA_FILE
+        if not metadata_file.exists():
+            return None
+
+        async with aiofiles.open(metadata_file, encoding="utf-8") as f:
+            content = await f.read()
+            data = json.loads(content)
+            return MediaEntity(**data)
+
+    async def _save_metadata(self, entity_dir: Path, entity: MediaEntity):
+        """Save metadata to metadata directory."""
+        metadata_file = entity_dir / METADATA_FILE
+        async with aiofiles.open(metadata_file, mode="w", encoding="utf-8") as f:
+            await f.write(entity.model_dump_json())

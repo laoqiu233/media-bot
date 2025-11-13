@@ -1,12 +1,10 @@
 """Data models for media library."""
 
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
 
 from pydantic import BaseModel, Field
-
-from dataclasses import dataclass
 
 
 class MediaType(str, Enum):
@@ -50,9 +48,9 @@ class DownloadedFile(BaseModel):
 
     id: str = Field(..., description="Unique identifier for the downloaded file")
     media_entity_id: str = Field(..., description="ID of the associated MediaEntity")
-    file_path: Path = Field(..., description="Path to the video file")
+    file_name: str = Field(..., description="Name of the video file")
     quality: VideoQuality = Field(default=VideoQuality.UNKNOWN, description="Video quality")
-    file_size: int | None = Field(None, description="File size in bytes")
+    file_size: int = Field(..., description="File size in bytes")
     downloaded_date: datetime = Field(default_factory=datetime.now, description="Date downloaded")
     source: str | None = Field(None, description="Source torrent name")
 
@@ -96,9 +94,6 @@ class MediaEntity(BaseModel):
         default_factory=list, description="List of downloaded files"
     )
 
-    class Config:
-        use_enum_values = True
-
 
 @dataclass
 class DownloadMovie:
@@ -122,9 +117,7 @@ class DownloadSeason:
     season: "IMDbSeason"
 
     def __str__(self) -> str:
-        return (
-            f"{self.series.primaryTitle} season {self.season.season}"
-        )
+        return f"{self.series.primaryTitle} season {self.season.season}"
 
 
 @dataclass
@@ -138,6 +131,7 @@ class DownloadEpisode:
 
 
 DownloadIMDbMetadata = DownloadMovie | DownloadSeries | DownloadSeason | DownloadEpisode
+
 
 @dataclass
 class FileMatch:
@@ -157,6 +151,7 @@ class MatchedTorrentFiles:
     warnings: list[str]  # Human-readable warnings
     download_metadata: DownloadIMDbMetadata
     total_files: int
+
 
 class UserWatchProgress(BaseModel):
     """User watch progress for a media item."""
@@ -550,7 +545,6 @@ def create_episode_entity(
     # This could be enhanced if the API response includes it
 
     episode_num = imdb_episode.episodeNumber or 0
-    season_str = imdb_episode.season or "Unknown"
 
     return MediaEntity(
         imdb_id=imdb_episode.id,

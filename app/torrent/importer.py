@@ -1,24 +1,30 @@
 """Torrent import service for adding downloads to library."""
 
 import logging
+from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 from app.library.imdb_client import IMDbClient
 from app.library.manager import LibraryManager
 from app.library.models import (
+    DownloadedFile,
     DownloadEpisode,
-    DownloadIMDbMetadata,
     DownloadMovie,
     DownloadSeason,
     DownloadSeries,
     FileMatch,
+    IMDbEpisode,
+    IMDbSeason,
+    IMDbTitle,
     MatchedTorrentFiles,
+    MediaEntity,
     create_episode_entity,
     create_movie_entity,
     create_season_entity,
     create_series_entity,
 )
-from app.library.models import VideoQuality
+from app.torrent.searcher import TorrentSearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +45,7 @@ class TorrentImporter:
     async def import_download(
         self,
         download_path: Path,
-        imdb_metadata: DownloadIMDbMetadata,
+        torrent: TorrentSearchResult,
         validation_result: MatchedTorrentFiles,
     ) -> None:
         """Import a completed download to library.
@@ -54,22 +60,36 @@ class TorrentImporter:
         """
         logger.info(f"Importing download from: {download_path}")
 
+        imdb_metadata = validation_result.download_metadata
+
         try:
             if isinstance(imdb_metadata, DownloadMovie):
                 await self._import_movie(
-                    download_path, imdb_metadata, validation_result.matched_files, quality=VideoQuality.UNKNOWN
+                    download_path,
+                    imdb_metadata,
+                    torrent,
+                    validation_result.matched_files,
                 )
             elif isinstance(imdb_metadata, DownloadEpisode):
+                detailed_episode = await self.imdb_client.get_title(imdb_metadata.episode.id)
+                if detailed_episode is None:
+                    raise ValueError(f"Episode not found on IMDb: {imdb_metadata.episode.id}")
                 await self._import_episode(
-                    download_path, imdb_metadata, validation_result.matched_files, quality=VideoQuality.UNKNOWN
+                    download_path,
+                    imdb_metadata,
+                    detailed_episode,
+                    torrent,
+                    validation_result.matched_files,
+                    None,
+                    None,
                 )
             elif isinstance(imdb_metadata, DownloadSeason):
                 await self._import_season(
-                    download_path, imdb_metadata, validation_result.matched_files, quality=VideoQuality.UNKNOWN
+                    download_path, imdb_metadata, torrent, validation_result.matched_files, None
                 )
             elif isinstance(imdb_metadata, DownloadSeries):
                 await self._import_series(
-                    download_path, imdb_metadata, validation_result.matched_files, quality=VideoQuality.UNKNOWN
+                    download_path, imdb_metadata, torrent, validation_result.matched_files
                 )
             else:
                 raise ValueError(f"Unknown metadata type: {type(imdb_metadata)}")
@@ -83,307 +103,162 @@ class TorrentImporter:
     async def _import_movie(
         self,
         download_path: Path,
-        download_movie: DownloadMovie,
+        imdb_metadata: DownloadMovie,
+        torrent: TorrentSearchResult,
         matched_files: list[FileMatch],
-        quality: VideoQuality,
-    ) -> None:
-        """Import a movie download.
-
-        Args:
-            download_path: Download path
-            download_movie: Movie metadata
-            matched_files: Matched files from validation
-            quality: Video quality
-        """
-        logger.info(f"Importing movie: {download_movie.movie.primaryTitle}")
-
+    ):
         if not matched_files:
             raise ValueError("No matched files for movie import")
-
-        # Get the movie file
-        file_match = matched_files[0]
-        file_path = self._find_file_in_download(download_path, file_match.file_path)
-
-        if not file_path:
-            raise FileNotFoundError(f"Movie file not found: {file_match.file_path}")
-
-        # Create or get movie entity
-        entity = await self.library.get_or_create_movie_entity(download_movie.movie)
-
-        # Add downloaded file
-        await self.library.add_downloaded_file(
+        matched_file = matched_files[0]
+        downloaded_file_path = self._find_file_in_download(download_path, matched_file.file_path)
+        if not downloaded_file_path:
+            raise FileNotFoundError(f"Movie file not found: {matched_file.file_path}")
+        entity = create_movie_entity(imdb_metadata.movie)
+        await self.library.create_or_update_entity(entity)
+        downloaded_file = DownloadedFile(
+            id=uuid4().hex,
             media_entity_id=entity.imdb_id,
-            file_path=file_path,
-            source=f"Torrent: {file_path.name}",
-            quality=quality,
+            file_name=downloaded_file_path.name,
+            quality=torrent.quality,
+            file_size=downloaded_file_path.stat().st_size,
+            downloaded_date=datetime.now(),
+            source=torrent.source,
         )
-
-        logger.info(f"Successfully imported movie: {entity.title}")
-
-    async def _import_episode(
-        self,
-        download_path: Path,
-        download_episode: DownloadEpisode,
-        matched_files: list[FileMatch],
-        quality: VideoQuality,
-    ) -> None:
-        """Import a single episode download.
-
-        Args:
-            download_path: Download path
-            download_episode: Episode metadata
-            matched_files: Matched files from validation
-            quality: Video quality
-        """
-        logger.info(
-            f"Importing episode: {download_episode.series.primaryTitle} S{download_episode.season.season}E{download_episode.episode.episodeNumber}"
-        )
-
-        if not matched_files:
-            raise ValueError("No matched files for episode import")
-
-        # Get series, season, episode from metadata
-        series_imdb = download_episode.series
-        season_imdb = download_episode.season
-        episode_imdb = download_episode.episode
-
-        # Fetch full episode details from IMDb
-        episode_details = await self.imdb_client.get_title(episode_imdb.id)
-
-        if not episode_details:
-            raise ValueError(f"Could not fetch episode details: {episode_imdb.id}")
-
-        # Get or create series
-        series_entity = await self.library.get_or_create_series_entity(series_imdb)
-
-        # Get or create season
-        season_entity = await self.library.get_or_create_season_entity(
-            series_entity.imdb_id, season_imdb
-        )
-
-        # Get or create episode
-        episode_entity = await self.library.get_or_create_episode_entity(
-            season_entity.imdb_id, episode_imdb, episode_details
-        )
-
-        # Find and add file
-        file_match = matched_files[0]
-        file_path = self._find_file_in_download(download_path, file_match.file_path)
-
-        if not file_path:
-            raise FileNotFoundError(f"Episode file not found: {file_match.file_path}")
-
-        await self.library.add_downloaded_file(
-            media_entity_id=episode_entity.imdb_id,
-            file_path=file_path,
-            source=f"Torrent: {file_path.name}",
-            quality=quality,
-        )
-
-        logger.info(f"Successfully imported episode: {episode_entity.title}")
-
-    async def _import_season(
-        self,
-        download_path: Path,
-        download_season: DownloadSeason,
-        matched_files: list[FileMatch],
-        quality: VideoQuality,
-    ) -> None:
-        """Import a season download.
-
-        Args:
-            download_path: Download path
-            download_season: Season metadata
-            matched_files: Matched files from validation
-            quality: Video quality
-        """
-        series_imdb = download_season.series
-        season_imdb = download_season.season
-
-        logger.info(f"Importing season: {series_imdb.primaryTitle} Season {season_imdb.season}")
-
-        if not matched_files:
-            raise ValueError("No matched files for season import")
-
-        # Fetch all episodes for this season from IMDb
-        episodes_list = await self.imdb_client.get_series_episodes(
-            series_imdb.id, season_imdb.season
-        )
-
-        # Create a mapping of episode number -> IMDbEpisode
-        episodes_map = {str(ep.episodeNumber): ep for ep in episodes_list if ep.episodeNumber}
-
-        # Get or create series and season entities (once)
-        series_entity = await self.library.get_or_create_series_entity(series_imdb)
-        season_entity = await self.library.get_or_create_season_entity(
-            series_entity.imdb_id, season_imdb
-        )
-
-        # Import each matched file
-        imported_count = 0
-        for file_match in matched_files:
-            try:
-                episode_num = file_match.episode_number
-
-                if not episode_num or episode_num not in episodes_map:
-                    logger.warning(
-                        f"Episode {episode_num} not found in IMDb data, skipping file: {file_match.file_path}"
-                    )
-                    continue
-
-                episode_imdb = episodes_map[episode_num]
-
-                # Fetch full episode details
-                episode_details = await self.imdb_client.get_title(episode_imdb.id)
-
-                if not episode_details:
-                    logger.warning(f"Could not fetch details for episode {episode_num}, skipping")
-                    continue
-
-                # Get or create episode entity
-                episode_entity = await self.library.get_or_create_episode_entity(
-                    season_entity.imdb_id, episode_imdb, episode_details
-                )
-
-                # Find and add file
-                file_path = self._find_file_in_download(download_path, file_match.file_path)
-
-                if not file_path:
-                    logger.warning(f"File not found: {file_match.file_path}")
-                    continue
-
-                await self.library.add_downloaded_file(
-                    media_entity_id=episode_entity.imdb_id,
-                    file_path=file_path,
-                    source=f"Torrent: {file_path.name}",
-                    quality=quality,
-                )
-
-                imported_count += 1
-                logger.info(f"Imported episode {episode_num}: {episode_entity.title}")
-
-            except Exception as e:
-                logger.error(f"Error importing file {file_match.file_path}: {e}")
-                continue
-
-        logger.info(
-            f"Successfully imported {imported_count}/{len(matched_files)} episodes from season"
-        )
+        await self.library._add_downloaded_file(entity, downloaded_file, downloaded_file_path)
 
     async def _import_series(
         self,
         download_path: Path,
-        download_series: DownloadSeries,
+        imdb_metadata: DownloadSeries,
+        torrent: TorrentSearchResult,
         matched_files: list[FileMatch],
-        quality: VideoQuality,
-    ) -> None:
-        """Import a complete series download.
-
-        Args:
-            download_path: Download path
-            download_series: Series metadata
-            matched_files: Matched files from validation
-            quality: Video quality
-        """
-        series_imdb = download_series.series
-
-        logger.info(f"Importing series: {series_imdb.primaryTitle}")
-
+    ):
         if not matched_files:
             raise ValueError("No matched files for series import")
+        series_entity = await self._create_or_update_series_entity(imdb_metadata.series)
+        imdb_seasons = await self.imdb_client.get_series_seasons(imdb_metadata.series.id)
 
-        # Group matched files by season
-        files_by_season = self._group_matches_by_season(matched_files)
+        for season in imdb_seasons:
+            seasons_metadata = DownloadSeason(series=imdb_metadata.series, season=season)
+            await self._import_season(
+                download_path, seasons_metadata, torrent, matched_files, series_entity
+            )
 
-        # Fetch all seasons
-        seasons_list = await self.imdb_client.get_series_seasons(series_imdb.id)
-        seasons_map = {str(season.season): season for season in seasons_list}
+    async def _import_season(
+        self,
+        download_path: Path,
+        imdb_metadata: DownloadSeason,
+        torrent: TorrentSearchResult,
+        matched_files: list[FileMatch],
+        series_entity: MediaEntity | None,
+    ):
+        if not matched_files:
+            raise ValueError("No matched files for season import")
 
-        # Get or create series entity (once)
-        series_entity = await self.library.get_or_create_series_entity(series_imdb)
+        if series_entity is None:
+            series_entity = await self._create_or_update_series_entity(imdb_metadata.series)
 
-        total_imported = 0
-
-        # Process each season
-        for season_num, season_files in files_by_season.items():
-            try:
-                logger.info(f"Processing season {season_num} with {len(season_files)} files")
-
-                if season_num not in seasons_map:
-                    logger.warning(f"Season {season_num} not found in IMDb data, skipping")
-                    continue
-
-                season_imdb = seasons_map[season_num]
-
-                # Fetch episodes for this season
-                episodes_list = await self.imdb_client.get_series_episodes(
-                    series_imdb.id, season_num
-                )
-                episodes_map = {
-                    str(ep.episodeNumber): ep for ep in episodes_list if ep.episodeNumber
-                }
-
-                # Get or create season entity
-                season_entity = await self.library.get_or_create_season_entity(
-                    series_entity.imdb_id, season_imdb
-                )
-
-                # Import each file in season
-                for file_match in season_files:
-                    try:
-                        episode_num = file_match.episode_number
-
-                        if not episode_num or episode_num not in episodes_map:
-                            logger.warning(
-                                f"Episode S{season_num}E{episode_num} not in IMDb data, skipping"
-                            )
-                            continue
-
-                        episode_imdb = episodes_map[episode_num]
-
-                        # Fetch full episode details
-                        episode_details = await self.imdb_client.get_title(episode_imdb.id)
-
-                        if not episode_details:
-                            logger.warning(
-                                f"Could not fetch details for S{season_num}E{episode_num}"
-                            )
-                            continue
-
-                        # Get or create episode entity
-                        episode_entity = await self.library.get_or_create_episode_entity(
-                            season_entity.imdb_id, episode_imdb, episode_details
-                        )
-
-                        # Find and add file
-                        file_path = self._find_file_in_download(download_path, file_match.file_path)
-
-                        if not file_path:
-                            logger.warning(f"File not found: {file_match.file_path}")
-                            continue
-
-                        await self.library.add_downloaded_file(
-                            media_entity_id=episode_entity.imdb_id,
-                            file_path=file_path,
-                            source=f"Torrent: {file_path.name}",
-                            quality=quality,
-                        )
-
-                        total_imported += 1
-
-                    except Exception as e:
-                        logger.error(
-                            f"Error importing S{season_num}E{file_match.episode_number}: {e}"
-                        )
-                        continue
-
-            except Exception as e:
-                logger.error(f"Error processing season {season_num}: {e}")
-                continue
-
-        logger.info(
-            f"Successfully imported {total_imported}/{len(matched_files)} episodes from series"
+        season_entity = await self._create_or_update_season_entity(
+            series_entity, imdb_metadata.season
         )
+        episodes = await self.imdb_client.get_series_episodes(
+            imdb_metadata.series.id, imdb_metadata.season.season
+        )
+        detailed_episodes = await self.imdb_client.get_titles_batch(
+            [episode.id for episode in episodes]
+        )
+
+        for episode, detailed_episode in zip(episodes, detailed_episodes, strict=False):
+            episodes_metadata = DownloadEpisode(
+                series=imdb_metadata.series, season=imdb_metadata.season, episode=episode
+            )
+            await self._import_episode(
+                download_path,
+                episodes_metadata,
+                detailed_episode,
+                torrent,
+                matched_files,
+                series_entity,
+                season_entity,
+            )
+
+    async def _import_episode(
+        self,
+        download_path: Path,
+        imdb_metadata: DownloadEpisode,
+        imdb_episode_detailed: IMDbTitle,
+        torrent: TorrentSearchResult,
+        matched_files: list[FileMatch],
+        series_entity: MediaEntity | None,
+        season_entity: MediaEntity | None,
+    ):
+        if not matched_files:
+            raise ValueError("No matched files for episode import")
+
+        if series_entity is None:
+            series_entity = await self._create_or_update_series_entity(imdb_metadata.series)
+        if season_entity is None:
+            season_entity = await self._create_or_update_season_entity(
+                series_entity, imdb_metadata.season
+            )
+
+        entity = await self._create_or_update_episode_entity(
+            series_entity, season_entity, imdb_metadata.episode, imdb_episode_detailed
+        )
+
+        for file in matched_files:
+            if file.episode is not None and file.episode.id == imdb_metadata.episode.id:
+                match_file = file
+                break
+        else:
+            raise ValueError(f"Episode file not found: {imdb_metadata.episode.id}")
+
+        downloaded_file_path = self._find_file_in_download(download_path, match_file.file_path)
+        if not downloaded_file_path:
+            raise FileNotFoundError(f"Episode file not found: {match_file.file_path}")
+        downloaded_file = DownloadedFile(
+            id=uuid4().hex,
+            media_entity_id=entity.imdb_id,
+            file_name=downloaded_file_path.name,
+            quality=torrent.quality,
+            file_size=downloaded_file_path.stat().st_size,
+            downloaded_date=datetime.now(),
+            source=torrent.source,
+        )
+        await self.library._add_downloaded_file(entity, downloaded_file, downloaded_file_path)
+
+    async def _create_or_update_series_entity(self, series: IMDbTitle) -> MediaEntity:
+        series_entity = await self.library.get_entity(series.id)
+        if (
+            new_series_entity := create_series_entity(series)
+        ) != series_entity or series_entity is None:
+            await self.library.create_or_update_entity(new_series_entity)
+            series_entity = new_series_entity
+        return series_entity
+
+    async def _create_or_update_season_entity(
+        self, series: MediaEntity, season: IMDbSeason
+    ) -> MediaEntity:
+        new_season_entity = create_season_entity(series, season)
+        season_entity = await self.library.get_entity(new_season_entity.imdb_id)
+        if new_season_entity != season_entity or season_entity is None:
+            await self.library.create_or_update_entity(new_season_entity)
+            season_entity = new_season_entity
+        return season_entity
+
+    async def _create_or_update_episode_entity(
+        self,
+        series: MediaEntity,
+        season: MediaEntity,
+        episode: IMDbEpisode,
+        imdb_episode_detailed: IMDbTitle,
+    ) -> MediaEntity:
+        new_episode_entity = create_episode_entity(series, season, episode, imdb_episode_detailed)
+        episode_entity = await self.library.get_entity(new_episode_entity.imdb_id)
+        if new_episode_entity != episode_entity or episode_entity is None:
+            await self.library.create_or_update_entity(new_episode_entity)
+            episode_entity = new_episode_entity
+        return episode_entity
 
     def _find_file_in_download(self, download_path: Path, file_path: str) -> Path | None:
         """Find a file in the download directory.
@@ -414,26 +289,3 @@ class TorrentImporter:
 
         logger.warning(f"File not found: {file_path} in {download_path}")
         return None
-
-    def _group_matches_by_season(
-        self, matched_files: list[FileMatch]
-    ) -> dict[str, list[FileMatch]]:
-        """Group file matches by season number.
-
-        Args:
-            matched_files: List of file matches
-
-        Returns:
-            Dictionary mapping season number (str) to list of file matches
-        """
-        groups = {}
-
-        for file_match in matched_files:
-            season = file_match.season_number
-
-            if season:
-                if season not in groups:
-                    groups[season] = []
-                groups[season].append(file_match)
-
-        return groups

@@ -133,7 +133,7 @@ class IMDbClient:
         # Use a dict to map title_id -> IMDbTitle for order preservation
         titles_map: dict[str, IMDbTitle] = {}
         batch_size = 5
-        url = f"{self.BASE_URL}/titles"
+        url = f"{self.BASE_URL}/titles:batchGet"
 
         # Process IDs in batches of 5
         for i in range(0, len(title_ids), batch_size):

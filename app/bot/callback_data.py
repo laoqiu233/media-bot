@@ -24,28 +24,17 @@ DOWNLOADS_CANCEL = "downloads:cancel:"  # Followed by task_id
 
 # Library screen callbacks
 LIBRARY_BACK = "library:back:"
-LIBRARY_SEARCH = "library:search:"
-LIBRARY_MAIN = "library:main:"
-LIBRARY_MOVIES = "library:movies:"
-LIBRARY_MOVIES_PREV = "library:movies_prev:"
-LIBRARY_MOVIES_NEXT = "library:movies_next:"
-LIBRARY_SCAN = "library:scan:"
-LIBRARY_FILTER = "library:filter:"
+LIBRARY_SHOW_MOVIES = "library:show_movies:"
+LIBRARY_SHOW_SERIES = "library:show_series:"
+LIBRARY_RESCAN = "library:rescan:"
+LIBRARY_SELECT_ENTITY = "library:select_entity:"  # Followed by entity_id
+LIBRARY_LIST_VIDEOS = "library:list_videos:"  # Followed by entity_id
+LIBRARY_NEXT_PAGE = "library:next_page:"
+LIBRARY_PREV_PAGE = "library:prev_page:"
 LIBRARY_CLEAR_FILTER = "library:clear_filter:"
-LIBRARY_VIEW_MOVIE = "library:view_movie:"  # Followed by movie_id (legacy)
-LIBRARY_PLAY_MOVIE = "library:play_movie:"  # Followed by movie_id (legacy)
-LIBRARY_DELETE_MOVIE = "library:delete_movie:"  # Followed by movie_id (legacy)
-LIBRARY_CONFIRM_DELETE = "library:confirm_delete:"  # Followed by movie_id (legacy)
-LIBRARY_VIEW_ENTITY = "library:view_entity:"  # Followed by entity_id
-LIBRARY_SELECT_FILE = "library:select_file:"  # Followed by file_id
-LIBRARY_VIEW_SERIES_SEASONS = "library:view_series_seasons:"  # Followed by series_id
-LIBRARY_VIEW_SEASON_EPISODES = "library:view_season_episodes:"  # Followed by season_id
-LIBRARY_VIEW_EPISODE = "library:view_episode:"  # Followed by episode_id
-LIBRARY_PLAY_FILE = "library:play_file:"  # Followed by file_id
-LIBRARY_DELETE_ENTITY = "library:delete_entity:"  # Followed by entity_id
-LIBRARY_DOWNLOAD_EPISODE = "library:download_episode:"  # Followed by episode_id
-LIBRARY_DOWNLOAD_SEASON = "library:download_season:"  # Followed by season_id
-LIBRARY_DOWNLOAD_SERIES = "library:download_series:"  # Followed by series_id
+LIBRARY_DELETE = "library:delete:"  # Followed by entity_id
+LIBRARY_BACK = "library:back"
+LIBRARY_PLAY = "library:play"  # Followed by file id
 
 # Player screen callbacks
 PLAYER_BACK = "player:back:"

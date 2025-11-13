@@ -1,6 +1,7 @@
 """Unified torrent screen for provider selection and results display."""
 
 import logging
+from dataclasses import dataclass, field
 
 from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -21,6 +22,7 @@ from app.bot.screens.base import (
     ScreenHandlerResult,
     ScreenRenderResult,
 )
+from app.bot.screens.movie_selection import MovieSelectionState
 from app.library.models import (
     DownloadEpisode,
     DownloadIMDbMetadata,
@@ -28,13 +30,9 @@ from app.library.models import (
     DownloadSeries,
     MatchedTorrentFiles,
 )
-from app.bot.screens.movie_selection import MovieSelectionState
 from app.torrent.downloader import TorrentDownloader
-from app.torrent.file_utils import format_file_size
 from app.torrent.searcher import TorrentSearcher, TorrentSearchResult
 from app.torrent.validator import TorrentValidator
-
-from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +133,7 @@ class TorrentScreen(Screen):
 
         search_query = str(state.imdb_metadata)
 
-        text = f"📥 *Select Torrent Provider*\n\n"
+        text = "📥 *Select Torrent Provider*\n\n"
         text += f"Searching for: {search_query}\n\n"
         text += "Choose where to search for torrents:"
 
@@ -213,7 +211,7 @@ class TorrentScreen(Screen):
         page_results = state.results[start_idx:end_idx]
 
         total_pages = (len(state.results) - 1) // ITEMS_PER_PAGE + 1
-        text = f"📥 *Torrent Results*\n\n"
+        text = "📥 *Torrent Results*\n\n"
         text += (
             f"Found {len(state.results)} results (page {state.results_page + 1}/{total_pages})\n\n"
         )
@@ -222,7 +220,12 @@ class TorrentScreen(Screen):
         for i, result in enumerate(page_results):
             # Escape markdown characters in all displayed fields
             logger.info(f"Result: {result.title}")
-            safe_title = result.title.replace("*", "\\*").replace("_", "\\_").replace("`", "\\`").replace("[", "\\[")
+            safe_title = (
+                result.title.replace("*", "\\*")
+                .replace("_", "\\_")
+                .replace("`", "\\`")
+                .replace("[", "\\[")
+            )
             text += f"{i + 1}. *{safe_title}*\n"
             text += f"   📁 {result.quality.value.capitalize()} • {result.size} • 🌱 {result.seeders} seeders\n\n"
 
@@ -336,9 +339,7 @@ class TorrentScreen(Screen):
         state.results_page = 0
         state.error = None
         try:
-            results = await self.searcher.search(
-                provider, imdb_metadata, limit=20
-            )
+            results = await self.searcher.search(provider, imdb_metadata, limit=20)
             if results:
                 state.results = results
             elif isinstance(imdb_metadata, DownloadEpisode):

@@ -4,8 +4,6 @@ import asyncio
 import logging
 from pathlib import Path
 
-import aiohttp
-
 try:
     import libtorrent as lt
 except ImportError:

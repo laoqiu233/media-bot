@@ -19,7 +19,7 @@ from app.bot.screens.base import (
     ScreenHandlerResult,
     ScreenRenderResult,
 )
-from app.torrent.downloader import TorrentDownloader, DownloadStatus
+from app.torrent.downloader import DownloadStatus, TorrentDownloader
 
 logger = logging.getLogger(__name__)
 

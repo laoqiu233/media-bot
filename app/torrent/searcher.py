@@ -2,17 +2,15 @@
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-import re
 from urllib.parse import quote
 
 import aiohttp
 from py_rutracker import AsyncRuTrackerClient
 
 from app.config import Config
-from app.library.models import VideoQuality, DownloadIMDbMetadata
-
-from dataclasses import dataclass
+from app.library.models import DownloadIMDbMetadata, VideoQuality
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +45,7 @@ class RuTrackerTorrentSearchResult(TorrentSearchResult):
         if self.torrent_file_link is None:
             raise ValueError("Torrent file link is not set")
 
-        if (
-            self.config.tracker.username is None
-            or self.config.tracker.password is None
-        ):
+        if self.config.tracker.username is None or self.config.tracker.password is None:
             raise ValueError("RuTracker credentials are not set")
 
         async with AsyncRuTrackerClient(
@@ -77,7 +72,9 @@ class TorrentSearcher:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
 
-    async def search(self, provider: str, query: DownloadIMDbMetadata, limit: int = 20) -> list[TorrentSearchResult]:
+    async def search(
+        self, provider: str, query: DownloadIMDbMetadata, limit: int = 20
+    ) -> list[TorrentSearchResult]:
         """Search for torrents across multiple sources.
 
         Args:
@@ -114,7 +111,9 @@ class TorrentSearcher:
         results.sort(key=lambda x: x.seeders, reverse=True)
         return results[:limit]
 
-    async def _search_yts(self, query: DownloadIMDbMetadata, limit: int) -> list[TorrentSearchResult]:
+    async def _search_yts(
+        self, query: DownloadIMDbMetadata, limit: int
+    ) -> list[TorrentSearchResult]:
         """Search YTS.mx using their API.
 
         Args:
@@ -229,7 +228,9 @@ class TorrentSearcher:
 
         return query_str
 
-    async def _search_tracker(self, query: DownloadIMDbMetadata, limit: int) -> list[TorrentSearchResult]:
+    async def _search_tracker(
+        self, query: DownloadIMDbMetadata, limit: int
+    ) -> list[TorrentSearchResult]:
         results = []
 
         # Generate Russian query for RuTracker (replace English keywords with Russian)
@@ -246,7 +247,7 @@ class TorrentSearcher:
             if not username or not password:
                 logger.error("RuTracker credentials not configured. Please set TRACKER_USERNAME and TRACKER_PASSWORD.")
                 return results
-            
+
             async with AsyncRuTrackerClient(
                 username,
                 password,

@@ -9,20 +9,19 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from py_rutracker import AsyncRuTrackerClient
-
 try:
     import libtorrent as lt
 except ImportError:
     lt = None
 
+from enum import Enum
+
 from app.config import Config
 from app.library.models import MatchedTorrentFiles
 from app.torrent.searcher import TorrentSearchResult
 
-from enum import Enum
-
 logger = logging.getLogger(__name__)
+
 
 class DownloadStatus(Enum):
     QUEUED = "queued"
@@ -30,6 +29,7 @@ class DownloadStatus(Enum):
     PAUSED = "paused"
     COMPLETED = "completed"
     ERROR = "error"
+
 
 @dataclass
 class DownloadState:

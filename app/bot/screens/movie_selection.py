@@ -32,8 +32,8 @@ from app.library.imdb_client import IMDbClient
 from app.library.models import (
     DownloadEpisode,
     DownloadMovie,
-    DownloadSeries,
     DownloadSeason,
+    DownloadSeries,
     IMDbEpisode,
     IMDbSeason,
     IMDbTitle,
@@ -456,7 +456,7 @@ class MovieSelectionScreen(Screen):
 
         elif query.data.startswith(MOVIE_SELECT_EPISODE):
             if state.selected_season_index is not None:
-                episode = int(query.data[len(MOVIE_SELECT_EPISODE) :]) 
+                episode = int(query.data[len(MOVIE_SELECT_EPISODE) :])
                 selected_series = state.detailed_movies[state.page]
                 selected_season = state.detailed_series_seasons.get(state.page, [])[
                     state.selected_season_index
