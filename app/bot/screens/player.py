@@ -12,6 +12,7 @@ from app.bot.callback_data import (
     PLAYER_RESUME,
     PLAYER_SEEK,
     PLAYER_STOP,
+    PLAYER_SUBTITLES,
     PLAYER_TRACKS,
     PLAYER_VOL_DOWN,
     PLAYER_VOL_UP,
@@ -114,6 +115,7 @@ class PlayerScreen(Screen):
                     ],
                     [
                         InlineKeyboardButton("🎵 Audio Tracks", callback_data=PLAYER_TRACKS),
+                        InlineKeyboardButton("📝 Subtitles", callback_data=PLAYER_SUBTITLES),
                     ],
                     [
                         InlineKeyboardButton("« Back to Menu", callback_data=PLAYER_BACK),
@@ -219,6 +221,15 @@ class PlayerScreen(Screen):
                 return None
             # Navigate to audio track selection screen
             return Navigation(next_screen="audio_track_selection")
+
+        elif query.data == PLAYER_SUBTITLES:
+            # Check if media is playing
+            status = await self.player.get_status()
+            if not status.get("current_file"):
+                await query.answer("No media is currently playing", show_alert=True)
+                return None
+            # Navigate to subtitle selection screen
+            return Navigation(next_screen="subtitle_selection")
 
         elif query.data.startswith(PLAYER_SEEK):
             try:

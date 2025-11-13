@@ -47,11 +47,16 @@ PLAYER_VOL_UP = "player:vol_up:"
 PLAYER_VOL_DOWN = "player:vol_down:"
 PLAYER_SEEK = "player:seek:"  # Followed by seconds (can be negative)
 PLAYER_TRACKS = "player:tracks:"
+PLAYER_SUBTITLES = "player:subtitles:"
 
 # Audio track selection callbacks
 AUDIO_TRACK_BACK = "audio_track:back:"
 AUDIO_TRACK_SELECT = "audio_track:select:"  # Followed by track_id
 
+# Subtitle selection callbacks
+SUBTITLE_BACK = "subtitle:back:"
+SUBTITLE_SELECT = "subtitle:select:"  # Followed by track_id
+SUBTITLE_REMOVE = "subtitle:remove:"
 
 # TV screen callbacks
 TV_BACK = "tv:back:"

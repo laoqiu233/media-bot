@@ -612,6 +612,80 @@ class MPVController:
             logger.error(f"Error setting audio track: {e}")
             return False
 
+    async def get_subtitle_tracks(self) -> list[dict[str, Any]]:
+        """Get list of available subtitle tracks.
+
+        Returns:
+            List of subtitle track dictionaries with id, title, lang, codec, etc.
+        """
+        if not self._player:
+            return []
+
+        try:
+            track_list = self._player.track_list
+            if not track_list:
+                return []
+
+            # Filter subtitle tracks
+            subtitle_tracks = []
+            for track in track_list:
+                if track.get("type") == "sub":
+                    subtitle_tracks.append({
+                        "id": track.get("id"),
+                        "title": track.get("title", ""),
+                        "lang": track.get("lang", ""),
+                        "codec": track.get("codec", ""),
+                        "selected": track.get("selected", False),
+                    })
+
+            return subtitle_tracks
+        except Exception as e:
+            logger.error(f"Error getting subtitle tracks: {e}")
+            return []
+
+    async def get_current_subtitle_track(self) -> int | None:
+        """Get current subtitle track ID.
+
+        Returns:
+            Current subtitle track ID or None if no subtitle is active
+        """
+        if not self._player:
+            return None
+
+        try:
+            sid = self._player.sid
+            # MPV returns None or "no" when no subtitle is selected
+            if sid is None or sid == "no":
+                return None
+            return int(sid) if sid is not None else None
+        except Exception:
+            return None
+
+    async def set_subtitle_track(self, track_id: int | None) -> bool:
+        """Set subtitle track by ID, or remove subtitles if None.
+
+        Args:
+            track_id: Subtitle track ID, or None to disable subtitles
+
+        Returns:
+            True if successful
+        """
+        if not self._player:
+            return False
+
+        try:
+            if track_id is None:
+                # Disable subtitles
+                self._player.sid = "no"
+                logger.info("Subtitles disabled")
+            else:
+                self._player.sid = track_id
+                logger.info(f"Subtitle track set to {track_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting subtitle track: {e}")
+            return False
+
     async def get_position(self) -> float | None:
         """Get current playback position in seconds.
 
