@@ -245,80 +245,51 @@ def _generate_styled_qr_png(url: str, out_path: Path) -> None:
     img.save(out_path, quality=100, optimize=False)
 
 
-async def _load_file_in_mpv(mpv_proc: subprocess.Popen | None, ipc_socket: Path, file_path: Path) -> None:
-    """Load a file in an existing mpv process using IPC.
+async def _load_file_in_mpv(file_path: Path) -> subprocess.Popen:
+    """Launch a new mpv process to display the provided image fullscreen in a loop.
     
     Args:
-        mpv_proc: The mpv process
-        ipc_socket: Path to the IPC socket
-        file_path: Path to the file to load
-    """
-    import socket as socket_lib
-    import json
-    
-    # Wait a bit for socket to be ready
-    await asyncio.sleep(0.3)
-    
-    # Check if socket exists
-    if not ipc_socket.exists():
-        logger.warning(f"IPC socket does not exist: {ipc_socket}")
-        return
-    
-    try:
-        # Connect to mpv IPC socket and send loadfile command
-        sock = socket_lib.socket(socket_lib.AF_UNIX, socket_lib.SOCK_STREAM)
-        sock.settimeout(2.0)
-        sock.connect(str(ipc_socket))
-        
-        # Send loadfile command (JSON will handle escaping)
-        command = {"command": ["loadfile", str(file_path), "replace"]}
-        command_json = json.dumps(command) + "\n"
-        sock.sendall(command_json.encode())
-        
-        # Read response (optional, but good for debugging)
-        try:
-            response = sock.recv(1024)
-            logger.debug(f"MPV IPC response: {response}")
-        except Exception:
-            pass
-        
-        sock.close()
-    except Exception as e:
-        logger.warning(f"Could not send loadfile command via IPC: {e}")
-
-
-def _get_shared_ipc_socket() -> Path:
-    """Get the shared IPC socket path for mpv image display.
-    
-    Returns:
-        Path to the shared IPC socket
-    """
-    import tempfile
-    # Use a fixed shared socket path so all parts of the app use the same mpv instance
-    return Path(tempfile.gettempdir()) / "mpv_media_bot.sock"
-
-
-def _check_ipc_socket_active(ipc_socket: Path) -> bool:
-    """Check if an IPC socket is active (mpv is running).
-    
-    Args:
-        ipc_socket: Path to the IPC socket
+        file_path: Path to the file to display
         
     Returns:
-        True if socket is active, False otherwise
+        The mpv process
     """
-    if not ipc_socket.exists():
-        return False
-    
-    try:
-        import socket as socket_lib
-        sock = socket_lib.socket(socket_lib.AF_UNIX, socket_lib.SOCK_STREAM)
-        sock.settimeout(0.2)
-        sock.connect(str(ipc_socket))
-        sock.close()
-        return True
-    except Exception:
-        return False
+    cmd = [
+        "mpv",
+        "--no-terminal",
+        "--force-window=yes",
+        "--image-display-duration=inf",
+        "--loop-file=inf",
+        "--fs",
+        "--no-border",
+        "--no-window-dragging",
+        "--no-input-default-bindings",
+        "--no-input-vo-keyboard",
+        "--keepaspect=no",  # Stretch to fill screen (no black bars)
+        "--video-unscaled=no",  # Allow scaling
+        "--panscan=1.0",  # Fill screen completely
+        "--video-margin-ratio-left=0",
+        "--video-margin-ratio-right=0",
+        "--video-margin-ratio-top=0",
+        "--video-margin-ratio-bottom=0",
+        "--fullscreen",
+        "--video-zoom=0",  # No zoom
+        "--video-pan-x=0",  # No horizontal pan
+        "--video-pan-y=0",  # No vertical pan
+        "--video-align-x=0",  # Center horizontally
+        "--video-align-y=0",  # Center vertically
+        str(file_path),
+    ]
+    # Start detached so we can kill later
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Wait for mpv to start and display the image
+    # Check process is running and wait for display to be ready
+    for _ in range(15):  # Check up to 1.5 seconds to ensure image is visible
+        await asyncio.sleep(0.1)
+        if proc.poll() is not None:
+            # Process exited, something went wrong
+            break
+    return proc
 
 
 async def _stop_loading3_gif() -> None:
@@ -378,69 +349,6 @@ async def _stop_loading3_gif() -> None:
         os.environ.pop("MEDIA_BOT_LOADING_PID", None)
 
 
-async def _display_with_mpv(image_path: Path, ipc_socket: Path | None = None, mpv_proc: subprocess.Popen | None = None) -> tuple[subprocess.Popen | None, Path]:
-    """Launch mpv to display the provided image fullscreen in a loop, or load it in existing process.
-    
-    Returns:
-        (process, ipc_socket_path) - The mpv process (None if using existing) and IPC socket path
-    """
-    # Use shared IPC socket path
-    shared_socket = _get_shared_ipc_socket()
-    
-    # Check if there's already an active mpv process with IPC
-    if _check_ipc_socket_active(shared_socket):
-        # Use existing mpv process via IPC
-        logger.info(f"Using existing mpv process via IPC socket: {shared_socket}")
-        await _load_file_in_mpv(None, shared_socket, image_path)
-        await asyncio.sleep(1.0)
-        return None, shared_socket
-    
-    # If we have a tracked process that's still running, use its socket
-    if mpv_proc is not None and ipc_socket is not None and mpv_proc.poll() is None:
-        await _load_file_in_mpv(mpv_proc, ipc_socket, image_path)
-        await asyncio.sleep(1.0)
-        return mpv_proc, ipc_socket
-    
-    # No existing process found - create new mpv process with shared IPC socket
-    logger.info(f"Creating new mpv process with IPC socket: {shared_socket}")
-    
-    cmd = [
-        "mpv",
-        "--no-terminal",
-        "--force-window=yes",
-        "--image-display-duration=inf",
-        "--loop-file=inf",
-        "--fs",
-        "--no-border",
-        "--no-window-dragging",
-        "--no-input-default-bindings",
-        "--no-input-vo-keyboard",
-        "--keepaspect=no",  # Stretch to fill screen (no black bars)
-        "--video-unscaled=no",  # Allow scaling
-        "--panscan=1.0",  # Fill screen completely
-        "--video-margin-ratio-left=0",
-        "--video-margin-ratio-right=0",
-        "--video-margin-ratio-top=0",
-        "--video-margin-ratio-bottom=0",
-        "--fullscreen",
-        "--video-zoom=0",  # No zoom
-        "--video-pan-x=0",  # No horizontal pan
-        "--video-pan-y=0",  # No vertical pan
-        "--video-align-x=0",  # Center horizontally
-        "--video-align-y=0",  # Center vertically
-        f"--input-ipc-server={shared_socket}",
-        str(image_path),
-    ]
-    # Start detached so we can kill later
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    # Wait for mpv to start and display the image
-    # Check process is running and wait for display to be ready
-    for _ in range(15):  # Check up to 1.5 seconds to ensure image is visible
-        await asyncio.sleep(0.1)
-        if proc.poll() is not None:
-            # Process exited, something went wrong
-            break
-    return proc, shared_socket
 
 
 class RuTrackerAuthScreen(Screen):
@@ -449,9 +357,6 @@ class RuTrackerAuthScreen(Screen):
     def __init__(self):
         """Initialize RuTracker auth screen."""
         self._mpv_proc: subprocess.Popen | None = None
-        self._mpv_ipc_socket: Path | None = None
-        # Use shared IPC socket
-        self._shared_socket = _get_shared_ipc_socket()
 
     def get_name(self) -> str:
         """Get screen name."""
@@ -475,33 +380,50 @@ class RuTrackerAuthScreen(Screen):
 
     async def on_exit(self, context: Context) -> None:
         """Called when leaving the screen."""
-        # Show loading3.gif in the same mpv process (like init_flow does)
+        # Stop QR code display and show loading3.gif
         try:
             project_root = _project_root()
             loading3_path = project_root / "loading3.gif"
             
-            # Check if mpv is still running (either our process or shared)
-            if _check_ipc_socket_active(self._shared_socket):
-                if loading3_path.exists():
-                    # Load loading3.gif in the same mpv process via shared socket
-                    await _load_file_in_mpv(self._mpv_proc, self._shared_socket, loading3_path)
-                    logger.info("Loaded loading3.gif in mpv process")
+            # Stop QR code mpv process if running
+            if self._mpv_proc is not None and self._mpv_proc.poll() is None:
+                try:
+                    self._mpv_proc.terminate()
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.to_thread(self._mpv_proc.wait), timeout=1.0
+                        )
+                    except asyncio.TimeoutError:
+                        self._mpv_proc.kill()
+                        await asyncio.to_thread(self._mpv_proc.wait)
+                except Exception as e:
+                    logger.warning(f"Error stopping QR code mpv process: {e}")
+                    try:
+                        if self._mpv_proc.poll() is None:
+                            self._mpv_proc.kill()
+                    except Exception:
+                        pass
+            
+            # Show loading3.gif in new mpv process
+            if loading3_path.exists():
+                try:
+                    loading_proc = await _load_file_in_mpv(loading3_path)
+                    logger.info("Loaded loading3.gif in new mpv process")
                     # Wait for loading3.gif to be fully visible
                     await asyncio.sleep(1.5)
-                
-                # If we own the process, store PID for MPV player
-                if self._mpv_proc is not None and self._mpv_proc.poll() is None:
-                    os.environ["MEDIA_BOT_LOADING_PID"] = str(self._mpv_proc.pid)
-                    logger.info(f"Leaving mpv process running (PID {self._mpv_proc.pid})")
+                    
+                    # Store PID for MPV player
+                    if loading_proc.poll() is None:
+                        os.environ["MEDIA_BOT_LOADING_PID"] = str(loading_proc.pid)
+                        logger.info(f"Leaving loading3.gif running (PID {loading_proc.pid})")
+                except Exception as e:
+                    logger.error(f"Error showing loading3.gif: {e}")
             
-            # Clear our references (but don't kill the process - it's shared)
+            # Clear our references
             self._mpv_proc = None
-            self._mpv_ipc_socket = None
         except Exception as e:
             logger.error(f"Error closing QR code display: {e}")
-            # Don't kill the process - it might be shared with other parts of the app
             self._mpv_proc = None
-            self._mpv_ipc_socket = None
 
     async def render(self, context: Context) -> ScreenRenderResult:
         """Render the RuTracker authorization screen."""
@@ -584,17 +506,11 @@ class RuTrackerAuthScreen(Screen):
                 
                 # Generate styled QR code image (like init_flow)
                 _generate_styled_qr_png(setup_url, qr_png)
-                
-                # Load QR code in the same mpv process (always use shared socket)
-                await _load_file_in_mpv(self._mpv_proc, self._shared_socket, qr_png)
-                logger.info("Loaded QR code in mpv process")
-                # Wait for QR code to be visible
                 await asyncio.sleep(1.5)
-                
-                logger.info(f"Displaying RuTracker QR code on screen: {setup_url}")
-                # Stop loading3.gif if it's running
-                await _stop_loading3_gif()
 
+                self._mpv_proc = await _load_file_in_mpv(qr_png)
+                logger.info("Displaying RuTracker QR code on screen in new mpv process")
+                # Wait for QR code to be visible
                 
             except Exception as e:
                 logger.error(f"Error displaying QR code: {e}", exc_info=True)
