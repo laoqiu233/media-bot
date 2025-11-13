@@ -7,7 +7,6 @@ from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, 
 
 from app.bot.callback_data import (
     PLAYER_BACK,
-    PLAYER_LIBRARY,
     PLAYER_PAUSE,
     PLAYER_RESUME,
     PLAYER_SEEK,
@@ -47,6 +46,13 @@ class PlayerScreen(Screen):
     def get_name(self) -> str:
         """Get screen name."""
         return "player"
+
+    async def on_enter(self, context: Context, **kwargs) -> None:
+        """Called when entering the screen."""
+        # Store the library state if provided (so we can return to it)
+        library_state = kwargs.get("library_state")
+        if library_state:
+            context.update_context(saved_library_state=library_state)
 
     async def render(self, context: Context) -> ScreenRenderResult:
         try:
@@ -118,7 +124,7 @@ class PlayerScreen(Screen):
                         InlineKeyboardButton("📝 Subtitles", callback_data=PLAYER_SUBTITLES),
                     ],
                     [
-                        InlineKeyboardButton("« Back to Menu", callback_data=PLAYER_BACK),
+                        InlineKeyboardButton("« Back", callback_data=PLAYER_BACK),
                     ],
                 ]
 
@@ -127,8 +133,7 @@ class PlayerScreen(Screen):
                 text += "Use Library to select content to play."
 
                 keyboard = [
-                    [InlineKeyboardButton("📚 Go to Library", callback_data=PLAYER_LIBRARY)],
-                    [InlineKeyboardButton("« Back to Menu", callback_data=PLAYER_BACK)],
+                    [InlineKeyboardButton("« Back", callback_data=PLAYER_BACK)],
                 ]
 
             return text, InlineKeyboardMarkup(keyboard), RenderOptions()
@@ -176,10 +181,11 @@ class PlayerScreen(Screen):
         context: Context,
     ) -> ScreenHandlerResult:
         if query.data == PLAYER_BACK:
+            # Check if we have a saved library state to return to
+            saved_library_state = context.get_context().get("saved_library_state")
+            if saved_library_state:
+                return Navigation(next_screen="library", library_state=saved_library_state)
             return Navigation(next_screen="main_menu")
-
-        elif query.data == PLAYER_LIBRARY:
-            return Navigation(next_screen="library")
 
         elif query.data == PLAYER_PAUSE:
             success = await self.player.pause()
@@ -219,7 +225,10 @@ class PlayerScreen(Screen):
             if not status.get("current_file"):
                 await query.answer("No media is currently playing", show_alert=True)
                 return None
-            # Navigate to audio track selection screen
+            # Navigate to audio track selection screen, passing library state through
+            saved_library_state = context.get_context().get("saved_library_state")
+            if saved_library_state:
+                return Navigation(next_screen="audio_track_selection", library_state=saved_library_state)
             return Navigation(next_screen="audio_track_selection")
 
         elif query.data == PLAYER_SUBTITLES:
@@ -228,7 +237,10 @@ class PlayerScreen(Screen):
             if not status.get("current_file"):
                 await query.answer("No media is currently playing", show_alert=True)
                 return None
-            # Navigate to subtitle selection screen
+            # Navigate to subtitle selection screen, passing library state through
+            saved_library_state = context.get_context().get("saved_library_state")
+            if saved_library_state:
+                return Navigation(next_screen="subtitle_selection", library_state=saved_library_state)
             return Navigation(next_screen="subtitle_selection")
 
         elif query.data.startswith(PLAYER_SEEK):

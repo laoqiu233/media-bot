@@ -32,6 +32,13 @@ class SubtitleSelectionScreen(Screen):
         """Get screen name."""
         return "subtitle_selection"
 
+    async def on_enter(self, context: Context, **kwargs) -> None:
+        """Called when entering the screen."""
+        # Store the library state if provided (so we can pass it back to player)
+        library_state = kwargs.get("library_state")
+        if library_state:
+            context.update_context(saved_library_state=library_state)
+
     async def render(self, context: Context) -> ScreenRenderResult:
         """Render the subtitle selection screen.
 
@@ -161,7 +168,10 @@ class SubtitleSelectionScreen(Screen):
         """
         try:
             if query.data == SUBTITLE_BACK:
-                # Return to player screen
+                # Return to player screen, passing library state back
+                saved_library_state = context.get_context().get("saved_library_state")
+                if saved_library_state:
+                    return Navigation(next_screen="player", library_state=saved_library_state)
                 return Navigation(next_screen="player")
 
             elif query.data == SUBTITLE_REMOVE:

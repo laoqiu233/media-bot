@@ -72,17 +72,26 @@ class LibraryScreen(Screen):
 
     async def on_enter(self, context: Context, **kwargs) -> None:
         """Called when entering the screen."""
-        context.update_context(
-            **{
-                LIBRARY_SCREEN_STATE: LibraryScreenState(
-                    view="main",
-                    movies_list=[],
-                    series_list=[],
-                    filter_query="",
-                )
-            }
-        )
-        self._update_entities_in_state(context)
+        # Check if we're returning with a saved state (e.g., from player)
+        saved_state = kwargs.get("library_state")
+        
+        if saved_state:
+            # Restore the full library state
+            context.update_context(**{LIBRARY_SCREEN_STATE: saved_state})
+            return
+        else:
+            # Default initialization
+            context.update_context(
+                **{
+                    LIBRARY_SCREEN_STATE: LibraryScreenState(
+                        view="main",
+                        movies_list=[],
+                        series_list=[],
+                        filter_query="",
+                    )
+                }
+            )
+            self._update_entities_in_state(context)
 
     def _update_entities_in_state(self, context: Context):
         state = self._get_state(context)
@@ -468,7 +477,8 @@ class LibraryScreen(Screen):
                 file_path = self.library.get_media_file_path(state.selected_entity, file_id)
                 result = await self.player.play(file_path)
                 if result:
-                    return Navigation(next_screen="player")
+                    # Pass the current library state to player so it can return to it
+                    return Navigation(next_screen="player", library_state=state)
 
         # Delete
         elif query.data.startswith(LIBRARY_DELETE):

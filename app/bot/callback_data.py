@@ -38,7 +38,6 @@ LIBRARY_PLAY = "library:play"  # Followed by file id
 
 # Player screen callbacks
 PLAYER_BACK = "player:back:"
-PLAYER_LIBRARY = "player:library:"
 PLAYER_REFRESH = "player:refresh:"
 PLAYER_PAUSE = "player:pause:"
 PLAYER_RESUME = "player:resume:"
