@@ -1165,7 +1165,9 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
     host_ip = _detect_local_ip()
     desired_port = 8766  # Different port from main setup
 
-    async def on_credentials_saved(username: str, password: str) -> tuple[bool, str | None]:
+    async def on_credentials_saved(
+        username: str, password: str, proxy: str | None = None
+    ) -> tuple[bool, str | None]:
         """Save credentials to .env file."""
         try:
             # Persist to .env at project root
@@ -1176,6 +1178,16 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
                 content = []
             new_lines = _append_or_replace_env_line(content, "TRACKER_USERNAME", username)
             new_lines = _append_or_replace_env_line(new_lines, "TRACKER_PASSWORD", password)
+            
+            # Save proxy if provided, otherwise remove it if it exists
+            if proxy and proxy.strip():
+                new_lines = _append_or_replace_env_line(new_lines, "TRACKER_PROXY", proxy.strip())
+                os.environ["TRACKER_PROXY"] = proxy.strip()
+            else:
+                # Remove TRACKER_PROXY if it exists
+                new_lines = _remove_env_line(new_lines, "TRACKER_PROXY")
+                os.environ.pop("TRACKER_PROXY", None)
+            
             env_path.write_text("".join(new_lines), encoding="utf-8")
 
             os.environ["TRACKER_USERNAME"] = username
@@ -1207,11 +1219,13 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
             return resp
 
         async def handle_index(_request: web.Request) -> web.Response:
+            tracker_proxy = os.getenv("TRACKER_PROXY", "")
             html = _render_template(
                 "rutracker_setup.html",
                 ERROR_BOX="",
                 TRACKER_USERNAME=tracker_username or "",
                 TRACKER_PASSWORD="",
+                TRACKER_PROXY=tracker_proxy,
             )
             return web.Response(text=html, content_type="text/html")
 
@@ -1221,9 +1235,12 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
             return web.Response(text=html_content, content_type="text/html")
 
         async def handle_submit(request: web.Request) -> web.Response:
+            import html as html_module
+
             data = await request.post()
             username = (data.get("tracker_username") or "").strip()
             password = (data.get("tracker_password") or "").strip()
+            proxy = (data.get("tracker_proxy") or "").strip()
 
             # Validate input
             if not username or not password:
@@ -1233,23 +1250,27 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
                     ERROR_BOX=error_html,
                     TRACKER_USERNAME=username,
                     TRACKER_PASSWORD="",
+                    TRACKER_PROXY=proxy,
                 )
                 return web.Response(text=html_content, content_type="text/html", status=400)
 
-            # Save credentials
-            success, error_msg = await on_credentials_saved(username, password)
+            # Save credentials (proxy is optional)
+            success, error_msg = await on_credentials_saved(
+                username, password, proxy if proxy else None
+            )
 
             if success:
                 return web.Response(
                     text='{"status": "success"}', content_type="application/json", status=200
                 )
             else:
-                error_html = f"<div class=\"error\">{html.escape(error_msg or 'Failed to save credentials')}</div>"
+                error_html = f'<div class="error">{html_module.escape(error_msg or "Failed to save credentials")}</div>'
                 html_content = _render_template(
                     "rutracker_setup.html",
                     ERROR_BOX=error_html,
                     TRACKER_USERNAME=username,
                     TRACKER_PASSWORD="",
+                    TRACKER_PROXY=proxy,
                 )
                 return web.Response(text=html_content, content_type="text/html", status=500)
 
@@ -1310,6 +1331,8 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
                             os.environ["TRACKER_USERNAME"] = line.split("=", 1)[1].strip()
                         elif line.startswith("TRACKER_PASSWORD="):
                             os.environ["TRACKER_PASSWORD"] = line.split("=", 1)[1].strip()
+                        elif line.startswith("TRACKER_PROXY="):
+                            os.environ["TRACKER_PROXY"] = line.split("=", 1)[1].strip()
                 if os.getenv("TRACKER_USERNAME") and os.getenv("TRACKER_PASSWORD"):
                     print("[init] RuTracker credentials saved, cleaning up server...")
                     try:

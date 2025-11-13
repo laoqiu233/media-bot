@@ -199,6 +199,11 @@
           <label for="tracker_password">RuTracker Password</label>
           <input id="tracker_password" name="tracker_password" type="password" placeholder="••••••••" value="{{TRACKER_PASSWORD}}" required>
         </div>
+        <div>
+          <label for="tracker_proxy">Tracker Proxy <span style="color: #94a3b8; font-weight: normal;">(optional)</span></label>
+          <input id="tracker_proxy" name="tracker_proxy" type="text" placeholder="http://proxy.example.com:8080" value="{{TRACKER_PROXY}}">
+          <p class="hint">Optional proxy server for RuTracker connections (e.g., http://proxy.example.com:8080)</p>
+        </div>
         <button type="submit" id="submit-btn">Save Credentials</button>
       </form>
       <div class="foot">

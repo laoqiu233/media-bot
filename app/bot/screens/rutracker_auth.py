@@ -146,6 +146,8 @@ class RuTrackerAuthScreen(Screen):
                         os.environ["TRACKER_USERNAME"] = line.split("=", 1)[1].strip()
                     elif line.startswith("TRACKER_PASSWORD="):
                         os.environ["TRACKER_PASSWORD"] = line.split("=", 1)[1].strip()
+                    elif line.startswith("TRACKER_PROXY="):
+                        os.environ["TRACKER_PROXY"] = line.split("=", 1)[1].strip()
 
             tracker_username = os.getenv("TRACKER_USERNAME")
             tracker_password = os.getenv("TRACKER_PASSWORD")
