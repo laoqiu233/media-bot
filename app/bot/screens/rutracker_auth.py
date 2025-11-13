@@ -321,6 +321,60 @@ def _check_ipc_socket_active(ipc_socket: Path) -> bool:
         return False
 
 
+async def _stop_loading3_gif() -> None:
+    """Stop loading3.gif process if it's running.
+    
+    Checks for MEDIA_BOT_LOADING_PID environment variable and stops the process.
+    """
+    loading_pid_str = os.environ.get("MEDIA_BOT_LOADING_PID")
+    if not loading_pid_str:
+        return
+    
+    try:
+        loading_pid = int(loading_pid_str)
+        # Check if process is still running
+        try:
+            result = subprocess.run(
+                ["kill", "-0", str(loading_pid)],
+                capture_output=True,
+                timeout=0.1,
+            )
+            if result.returncode == 0:
+                # Process exists, stop it
+                logger.info(f"Stopping loading3.gif process (PID {loading_pid})")
+                try:
+                    # Try graceful termination first
+                    subprocess.run(["kill", str(loading_pid)], timeout=0.1)
+                    await asyncio.sleep(0.5)
+                    # Check if it's still running
+                    result = subprocess.run(
+                        ["kill", "-0", str(loading_pid)],
+                        capture_output=True,
+                        timeout=0.1,
+                    )
+                    if result.returncode == 0:
+                        # Still running, force kill
+                        subprocess.run(["kill", "-9", str(loading_pid)], timeout=0.1)
+                        logger.info(f"Force killed loading3.gif process (PID {loading_pid})")
+                except Exception as e:
+                    logger.warning(f"Error stopping loading3.gif: {e}")
+                    # Try force kill as fallback
+                    try:
+                        subprocess.run(["kill", "-9", str(loading_pid)], timeout=0.1)
+                    except Exception:
+                        pass
+        except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
+            # Process doesn't exist or kill command failed
+            pass
+        
+        # Clear the environment variable
+        os.environ.pop("MEDIA_BOT_LOADING_PID", None)
+        logger.info("Stopped loading3.gif process")
+    except ValueError:
+        # Invalid PID
+        os.environ.pop("MEDIA_BOT_LOADING_PID", None)
+
+
 async def _display_with_mpv(image_path: Path, ipc_socket: Path | None = None, mpv_proc: subprocess.Popen | None = None) -> tuple[subprocess.Popen | None, Path]:
     """Launch mpv to display the provided image fullscreen in a loop, or load it in existing process.
     
@@ -517,6 +571,7 @@ class RuTrackerAuthScreen(Screen):
             try:
                 await query.answer("Displaying QR code on screen...", show_alert=False)
                 
+                
                 project_root = _project_root()
                 
                 # Show loading.gif first (like init_flow does)
@@ -544,6 +599,9 @@ class RuTrackerAuthScreen(Screen):
                 await asyncio.sleep(1.5)
                 
                 logger.info(f"Displaying RuTracker QR code on screen: {setup_url}")
+                # Stop loading3.gif if it's running
+                await _stop_loading3_gif()
+
                 
             except Exception as e:
                 logger.error(f"Error displaying QR code: {e}", exc_info=True)
