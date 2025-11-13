@@ -96,6 +96,7 @@ class MPVController:
                 keepaspect=True,  # Maintain aspect ratio (native size)
                 panscan=0.0,  # No pan/scan (native size)
                 video_unscaled="no",  # Allow scaling but maintain aspect
+                ontop=True,  # Keep window on top
             )
 
             # Register event handlers
@@ -773,6 +774,7 @@ class MPVController:
                 "--image-display-duration=inf",
                 "--loop-file=inf",
                 "--fs",
+                "--ontop",
                 "--no-border",
                 "--no-window-dragging",
                 "--no-input-default-bindings",

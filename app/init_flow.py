@@ -714,6 +714,7 @@ async def _display_with_mpv(image_path: Path) -> subprocess.Popen:
         "--image-display-duration=inf",
         "--loop-file=inf",
         "--fs",
+        "--ontop",
         "--no-border",
         "--no-window-dragging",
         "--no-input-default-bindings",
