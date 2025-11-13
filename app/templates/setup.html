@@ -46,10 +46,18 @@
         width: 100%;
         box-sizing: border-box;
       }
+      form > div {
+        width: 100%;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+      }
       label {
         font-weight: 600;
         letter-spacing: 0.25px;
         margin-bottom: 0.35rem;
+        width: 100%;
+        box-sizing: border-box;
       }
       input[type="text"],
       input[type="password"] {
@@ -174,6 +182,9 @@
         border-radius: 12px;
         background: rgba(15, 23, 42, 0.6);
         padding: 0.5rem;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
       }
       .wifi-item {
         padding: 0.75rem;
@@ -222,6 +233,8 @@
         cursor: pointer;
         transition: all 0.2s ease;
         width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
       }
       .scan-button:hover {
         background: rgba(59, 130, 246, 0.3);
