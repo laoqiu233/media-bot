@@ -244,12 +244,65 @@ def _generate_styled_qr_png(url: str, out_path: Path) -> None:
     img.save(out_path, quality=100, optimize=False)
 
 
-async def _display_with_mpv(image_path: Path) -> subprocess.Popen:
-    """Launch mpv to display the provided image fullscreen in a loop.
+async def _load_file_in_mpv(mpv_proc: subprocess.Popen, ipc_socket: Path, file_path: Path) -> None:
+    """Load a file in an existing mpv process using IPC.
     
-    Returns the process. The caller should wait for the image to actually load
-    before stopping any loading screens.
+    Args:
+        mpv_proc: The mpv process
+        ipc_socket: Path to the IPC socket
+        file_path: Path to the file to load
     """
+    import socket as socket_lib
+    import json
+    
+    # Wait a bit for socket to be ready
+    await asyncio.sleep(0.3)
+    
+    # Check if socket exists
+    if not ipc_socket.exists():
+        logger.warning(f"IPC socket does not exist: {ipc_socket}")
+        return
+    
+    try:
+        # Connect to mpv IPC socket and send loadfile command
+        sock = socket_lib.socket(socket_lib.AF_UNIX, socket_lib.SOCK_STREAM)
+        sock.settimeout(2.0)
+        sock.connect(str(ipc_socket))
+        
+        # Send loadfile command (JSON will handle escaping)
+        command = {"command": ["loadfile", str(file_path), "replace"]}
+        command_json = json.dumps(command) + "\n"
+        sock.sendall(command_json.encode())
+        
+        # Read response (optional, but good for debugging)
+        try:
+            response = sock.recv(1024)
+            logger.debug(f"MPV IPC response: {response}")
+        except Exception:
+            pass
+        
+        sock.close()
+    except Exception as e:
+        logger.warning(f"Could not send loadfile command via IPC: {e}")
+
+
+async def _display_with_mpv(image_path: Path, ipc_socket: Path | None = None, mpv_proc: subprocess.Popen | None = None) -> tuple[subprocess.Popen, Path]:
+    """Launch mpv to display the provided image fullscreen in a loop, or load it in existing process.
+    
+    Returns:
+        (process, ipc_socket_path) - The mpv process and IPC socket path
+    """
+    # If we have an existing process, use IPC to load the new file
+    if mpv_proc is not None and ipc_socket is not None and mpv_proc.poll() is None:
+        await _load_file_in_mpv(mpv_proc, ipc_socket, image_path)
+        # Wait for file to load
+        await asyncio.sleep(1.0)
+        return mpv_proc, ipc_socket
+    
+    # Create new mpv process with IPC
+    import tempfile
+    ipc_socket_path = Path(tempfile.gettempdir()) / f"mpv_rutracker_{os.getpid()}.sock"
+    
     cmd = [
         "mpv",
         "--no-terminal",
@@ -274,6 +327,7 @@ async def _display_with_mpv(image_path: Path) -> subprocess.Popen:
         "--video-pan-y=0",  # No vertical pan
         "--video-align-x=0",  # Center horizontally
         "--video-align-y=0",  # Center vertically
+        f"--input-ipc-server={ipc_socket_path}",
         str(image_path),
     ]
     # Start detached so we can kill later
@@ -285,7 +339,7 @@ async def _display_with_mpv(image_path: Path) -> subprocess.Popen:
         if proc.poll() is not None:
             # Process exited, something went wrong
             break
-    return proc
+    return proc, ipc_socket_path
 
 
 class RuTrackerAuthScreen(Screen):
@@ -293,9 +347,8 @@ class RuTrackerAuthScreen(Screen):
 
     def __init__(self):
         """Initialize RuTracker auth screen."""
-        self._qr_proc: subprocess.Popen | None = None
-        self._loading_proc: subprocess.Popen | None = None
-        self._loading3_proc: subprocess.Popen | None = None
+        self._mpv_proc: subprocess.Popen | None = None
+        self._mpv_ipc_socket: Path | None = None
 
     def get_name(self) -> str:
         """Get screen name."""
@@ -331,62 +384,34 @@ class RuTrackerAuthScreen(Screen):
 
     async def on_exit(self, context: Context) -> None:
         """Called when leaving the screen."""
-        # Show loading3.gif before closing QR code (like init_flow does)
-        if self._qr_proc is not None:
+        # Show loading3.gif in the same mpv process, then close it (like init_flow does)
+        if self._mpv_proc is not None and self._mpv_proc.poll() is None:
             try:
-                # Stop loading.gif if it's still running
-                if self._loading_proc is not None and self._loading_proc.poll() is None:
-                    try:
-                        self._loading_proc.terminate()
-                        try:
-                            await asyncio.wait_for(
-                                asyncio.to_thread(self._loading_proc.wait), timeout=0.5
-                            )
-                        except asyncio.TimeoutError:
-                            self._loading_proc.kill()
-                            await asyncio.to_thread(self._loading_proc.wait)
-                    except Exception:
-                        pass
-                    self._loading_proc = None
-                
-                # Show loading3.gif before closing QR code screen
                 project_root = _project_root()
                 loading3_path = project_root / "loading3.gif"
-                if loading3_path.exists():
-                    try:
-                        self._loading3_proc = await _display_with_mpv(loading3_path)
-                        logger.info("Started loading3.gif before closing QR code screen")
-                        # Wait for loading3.gif to be fully visible
-                        await asyncio.sleep(1.5)
-                    except Exception as e:
-                        logger.warning(f"Could not show loading3.gif: {e}")
+                if loading3_path.exists() and self._mpv_ipc_socket is not None:
+                    # Load loading3.gif in the same mpv process
+                    await _load_file_in_mpv(self._mpv_proc, self._mpv_ipc_socket, loading3_path)
+                    logger.info("Loaded loading3.gif in mpv process")
+                    # Wait for loading3.gif to be fully visible
+                    await asyncio.sleep(1.5)
                 
-                # Now close QR code screen (loading3.gif is already visible)
-                self._qr_proc.terminate()
-                try:
-                    await asyncio.wait_for(
-                        asyncio.to_thread(self._qr_proc.wait), timeout=1.0
-                    )
-                except asyncio.TimeoutError:
-                    self._qr_proc.kill()
-                    await asyncio.to_thread(self._qr_proc.wait)
-                self._qr_proc = None
-                
-                # Don't stop loading3.gif - let MPV player or system manage it
-                if self._loading3_proc is not None and self._loading3_proc.poll() is None:
-                    # Store PID so MPV player knows loading3.gif is already running
-                    os.environ["MEDIA_BOT_LOADING_PID"] = str(self._loading3_proc.pid)
-                    logger.info(f"Leaving loading3.gif running (PID {self._loading3_proc.pid})")
-                    self._loading3_proc = None
+                # Don't stop mpv - let MPV player or system manage it
+                # Store PID so MPV player knows loading3.gif is already running
+                os.environ["MEDIA_BOT_LOADING_PID"] = str(self._mpv_proc.pid)
+                logger.info(f"Leaving mpv process running (PID {self._mpv_proc.pid})")
+                self._mpv_proc = None
+                self._mpv_ipc_socket = None
             except Exception as e:
                 logger.error(f"Error closing QR code display: {e}")
-                if self._qr_proc is not None:
+                if self._mpv_proc is not None:
                     try:
-                        if self._qr_proc.poll() is None:
-                            self._qr_proc.kill()
+                        if self._mpv_proc.poll() is None:
+                            self._mpv_proc.kill()
                     except Exception:
                         pass
-                    self._qr_proc = None
+                    self._mpv_proc = None
+                self._mpv_ipc_socket = None
 
     async def render(self, context: Context) -> ScreenRenderResult:
         """Render the RuTracker authorization screen."""
@@ -462,44 +487,17 @@ class RuTrackerAuthScreen(Screen):
             try:
                 await query.answer("Displaying QR code on screen...", show_alert=False)
                 
-                # Close any existing displays
-                if self._qr_proc is not None:
-                    try:
-                        self._qr_proc.terminate()
-                        try:
-                            await asyncio.wait_for(
-                                asyncio.to_thread(self._qr_proc.wait), timeout=0.5
-                            )
-                        except asyncio.TimeoutError:
-                            self._qr_proc.kill()
-                            await asyncio.to_thread(self._qr_proc.wait)
-                    except Exception:
-                        pass
-                    self._qr_proc = None
-                
-                if self._loading_proc is not None:
-                    try:
-                        self._loading_proc.terminate()
-                        try:
-                            await asyncio.wait_for(
-                                asyncio.to_thread(self._loading_proc.wait), timeout=0.5
-                            )
-                        except asyncio.TimeoutError:
-                            self._loading_proc.kill()
-                            await asyncio.to_thread(self._loading_proc.wait)
-                    except Exception:
-                        pass
-                    self._loading_proc = None
+                project_root = _project_root()
                 
                 # Show loading.gif first (like init_flow does)
-                project_root = _project_root()
                 loading_path = project_root / "loading.gif"
                 if loading_path.exists():
-                    try:
-                        self._loading_proc = await _display_with_mpv(loading_path)
-                        logger.info("Showing loading.gif before QR code...")
-                    except Exception as e:
-                        logger.warning(f"Could not show loading.gif: {e}")
+                    # Start mpv with loading.gif (or load it if mpv is already running)
+                    self._mpv_proc, self._mpv_ipc_socket = await _display_with_mpv(
+                        loading_path, self._mpv_ipc_socket, self._mpv_proc
+                    )
+                    logger.info("Showing loading.gif before QR code...")
+                    await asyncio.sleep(0.5)  # Brief pause
                 
                 # Prepare QR code image path
                 tmp_dir = project_root / ".setup"
@@ -509,32 +507,16 @@ class RuTrackerAuthScreen(Screen):
                 # Generate styled QR code image (like init_flow)
                 _generate_styled_qr_png(setup_url, qr_png)
                 
-                # Display QR code on TV screen using mpv
-                self._qr_proc = await _display_with_mpv(qr_png)
-                # QR code screen is now loaded - wait a moment to ensure it's visible
-                await asyncio.sleep(1.5)
-                
-                # NOW stop loading.gif after QR code screen is confirmed loaded and visible
-                if self._loading_proc is not None and self._qr_proc.poll() is None:
-                    try:
-                        self._loading_proc.terminate()
-                        try:
-                            await asyncio.wait_for(
-                                asyncio.to_thread(self._loading_proc.wait), timeout=1.0
-                            )
-                        except asyncio.TimeoutError:
-                            self._loading_proc.kill()
-                            await asyncio.to_thread(self._loading_proc.wait)
-                        logger.info("Stopped loading.gif after QR code screen loaded")
-                        self._loading_proc = None
-                    except Exception as e:
-                        logger.error(f"Error stopping loading.gif: {e}")
-                        try:
-                            if self._loading_proc and self._loading_proc.poll() is None:
-                                self._loading_proc.kill()
-                        except Exception:
-                            pass
-                        self._loading_proc = None
+                # Load QR code in the same mpv process
+                if self._mpv_proc is not None and self._mpv_ipc_socket is not None:
+                    await _load_file_in_mpv(self._mpv_proc, self._mpv_ipc_socket, qr_png)
+                    logger.info("Loaded QR code in mpv process")
+                    # Wait for QR code to be visible
+                    await asyncio.sleep(1.5)
+                else:
+                    # Fallback: start new mpv process if something went wrong
+                    self._mpv_proc, self._mpv_ipc_socket = await _display_with_mpv(qr_png)
+                    await asyncio.sleep(1.5)
                 
                 logger.info(f"Displaying RuTracker QR code on screen: {setup_url}")
                 
