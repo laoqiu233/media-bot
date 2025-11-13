@@ -254,6 +254,11 @@ class MPVController:
                 # Setup is complete, show loading.gif if no media is playing
                 if not self._is_playing:
                     asyncio.create_task(self._show_loading_gif())
+                
+                # Start background task to periodically check for active downloads
+                # and update display accordingly
+                download_check_task = asyncio.create_task(self._periodic_download_check())
+                self._background_tasks.add(download_check_task)
 
         except Exception as e:
             logger.error(f"Failed to initialize MPV player: {e}")
@@ -954,6 +959,52 @@ class MPVController:
                 except Exception as e:
                     logger.error(f"Error in event handler for {event}: {e}")
 
+    async def _periodic_download_check(self) -> None:
+        """Background task to periodically check for active downloads and update TV display.
+        
+        This ensures download progress is shown when downloads start, even if
+        _show_loading_gif() wasn't called at that moment.
+        """
+        while True:
+            try:
+                await asyncio.sleep(2.0)  # Check every 2 seconds
+                
+                # Only check if no media is playing
+                if self._is_playing:
+                    continue
+                
+                # Check for active downloads
+                if self._downloader is None:
+                    continue
+                
+                tasks = await self._downloader.get_all_tasks()
+                active_statuses = ["downloading", "checking", "queued"]
+                active_tasks = [t for t in tasks if t.status.value in active_statuses]
+                
+                logger.debug(f"Periodic check: {len(active_tasks)} active downloads, showing_progress={self._showing_download_progress}")
+                
+                # If we're showing download progress, the update task will handle it
+                if self._showing_download_progress:
+                    continue
+                
+                # If there are active downloads but we're not showing progress, show it
+                if active_tasks:
+                    logger.info(f"Detected {len(active_tasks)} active download(s), showing progress on TV")
+                    # Always show progress if there are active downloads (even if process is running)
+                    # This handles the case where loading3.gif is showing but downloads just started
+                    await self._show_download_progress()
+                else:
+                    # No active downloads, make sure we're showing loading3.gif
+                    if self._loading_proc is None or self._loading_proc.poll() is not None:
+                        # No process running, show loading3.gif
+                        await self._show_loading_gif()
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in periodic download check: {e}", exc_info=True)
+                await asyncio.sleep(2.0)  # Wait before retrying
+
     def _detect_screen_resolution(self) -> tuple[int, int]:
         """Detect screen resolution, defaulting to 1920x1080 if detection fails."""
         try:
@@ -1272,6 +1323,12 @@ class MPVController:
             if not active_tasks:
                 return False
             
+            # If we're already showing download progress, the update task will handle it
+            # But if we're showing loading3.gif, we need to switch to progress
+            if self._showing_download_progress:
+                # Already showing progress, update task will refresh it
+                return True
+            
             # Generate progress image
             project_root = Path(__file__).resolve().parents[2]
             tmp_dir = project_root / ".setup"
@@ -1363,10 +1420,15 @@ class MPVController:
             return  # Download progress is showing, don't show loading3.gif
         
         # No active downloads, show loading3.gif
+        # Check if process is already running (but allow switching from progress to loading3)
         if self._loading_proc is not None:
             # Check if the process is still running
             if self._loading_proc.poll() is None:
-                return  # Already showing and running
+                # Check if we're already showing loading3.gif (not progress)
+                # If showing progress, we need to switch to loading3.gif
+                if not self._showing_download_progress:
+                    return  # Already showing loading3.gif and running
+                # Otherwise, we're showing progress and need to switch to loading3.gif
             else:
                 # Process died, clear it
                 self._loading_proc = None
