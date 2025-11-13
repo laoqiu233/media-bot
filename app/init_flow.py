@@ -1149,178 +1149,6 @@ async def ensure_telegram_token(force: bool = False) -> None:
         os.environ.pop("MEDIA_BOT_SETUP_ACTIVE", None)
 
 
-def _generate_rutracker_qr(setup_url: str, out_path: Path) -> None:
-    """Create a QR code image for RuTracker setup URL.
-    
-    Uses the same styling as the main setup QR code but simpler (single QR).
-    """
-    # Detect screen resolution for responsive design
-    screen_width, screen_height = _detect_screen_resolution()
-
-    # Generate QR code with high error correction for mobile scanning
-    qr_factory = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_H,  # High error correction for mobile
-        box_size=14,
-        border=4,
-    )
-    qr_factory.add_data(setup_url)
-    qr_factory.make(fit=True)
-    url_qr = qr_factory.make_image(fill_color="black", back_color="white").convert("RGB")
-
-    # Responsive sizing based on screen resolution
-    base_size = min(screen_width, screen_height) * 0.4  # 40% of smaller dimension for single QR
-    qr_size = max(int(base_size), 500)  # Minimum 500px for scanning, scales up for TV
-
-    # Scale QR code
-    url_qr = url_qr.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
-
-    # Responsive spacing and layout
-    scale_factor = min(screen_width / 1920, screen_height / 1080, 1.5)  # Cap at 1.5x
-    padding = int(60 * scale_factor)
-    title_height = int(120 * scale_factor)
-    label_height = int(70 * scale_factor)
-    text_height = int(100 * scale_factor)
-
-    # Calculate layout
-    width = screen_width
-    height = screen_height
-    content_width = padding * 2 + qr_size
-    content_height = padding * 2 + title_height + qr_size + label_height + text_height
-
-    # Center content
-    offset_x = (width - content_width) // 2 if content_width < width else 0
-    offset_y = (height - content_height) // 2 if content_height < height else 0
-
-    # Create base image with form-style dark gradient background
-    img = Image.new("RGB", (width, height), color=(2, 6, 23))  # #020617
-    draw = ImageDraw.Draw(img)
-
-    # Fast linear gradient from top to bottom
-    step = max(4, height // 200)
-    for y in range(0, height, step):
-        ratio = y / height if height > 0 else 0
-        if ratio < 0.45:
-            local_ratio = ratio / 0.45 if 0.45 > 0 else 0
-            r = int(30 - (30 - 15) * local_ratio)
-            g = int(41 - (41 - 23) * local_ratio)
-            b = int(59 - (59 - 42) * local_ratio)
-        else:
-            local_ratio = (ratio - 0.45) / 0.55 if 0.55 > 0 else 0
-            r = int(15 - (15 - 2) * local_ratio)
-            g = int(23 - (23 - 6) * local_ratio)
-            b = int(42 - (42 - 23) * local_ratio)
-        draw.rectangle([(0, y), (width, min(y + step, height))], fill=(r, g, b))
-
-    # Load fonts
-    font_size_title = int(44 * scale_factor)
-    font_size_label = int(30 * scale_factor)
-    font_size_text = int(24 * scale_factor)
-
-    try:
-        font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", font_size_title)
-        font_label = ImageFont.truetype("DejaVuSans-Bold.ttf", font_size_label)
-        font_text = ImageFont.truetype("DejaVuSans.ttf", font_size_text)
-    except Exception:
-        try:
-            font_title = ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size_title
-            )
-            font_label = ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size_label
-            )
-            font_text = ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size_text
-            )
-        except Exception:
-            font_title = ImageFont.load_default()
-            font_label = ImageFont.load_default()
-            font_text = ImageFont.load_default()
-
-    # Title
-    title_text = "RuTracker Authorization"
-    title_bbox = draw.textbbox((0, 0), title_text, font=font_title)
-    title_width = title_bbox[2] - title_bbox[0]
-    title_x = (
-        offset_x + (content_width - title_width) // 2
-        if content_width < width
-        else (width - title_width) // 2
-    )
-    title_y = offset_y + padding
-
-    # Title glow effect
-    title_glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    title_glow_draw = ImageDraw.Draw(title_glow)
-    for offset in range(4, 0, -1):
-        alpha = int(20 * (1 - offset / 4))
-        if alpha > 0:
-            r = int(22 + (16 - 22) * (offset / 4))
-            g = int(211 + (163 - 211) * (offset / 4))
-            b = int(238 + (74 - 238) * (offset / 4))
-            title_glow_draw.text(
-                (title_x + offset, title_y + offset),
-                title_text,
-                fill=(r, g, b, alpha),
-                font=font_title,
-            )
-    img = Image.alpha_composite(img.convert("RGBA"), title_glow).convert("RGB")
-    draw = ImageDraw.Draw(img)
-
-    # Draw title
-    draw.text((title_x + 2, title_y + 2), title_text, fill=(0, 0, 0), font=font_title)
-    draw.text((title_x, title_y), title_text, fill=(255, 255, 255), font=font_title)
-
-    # QR code label
-    label_text = "Scan to Open Setup"
-    label_bbox = draw.textbbox((0, 0), label_text, font=font_label)
-    label_width = label_bbox[2] - label_bbox[0]
-    label_x = offset_x + padding + (qr_size - label_width) // 2
-    label_y = offset_y + padding + title_height + 20
-
-    # Label glow
-    label_glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    label_glow_draw = ImageDraw.Draw(label_glow)
-    for offset in range(3, 0, -1):
-        alpha = int(15 * (1 - offset / 3))
-        if alpha > 0:
-            r = int(22 + (16 - 22) * (offset / 3))
-            g = int(211 + (163 - 211) * (offset / 3))
-            b = int(238 + (74 - 238) * (offset / 3))
-            label_glow_draw.text(
-                (label_x + offset, label_y + offset),
-                label_text,
-                fill=(r, g, b, alpha),
-                font=font_label,
-            )
-    img = Image.alpha_composite(img.convert("RGBA"), label_glow).convert("RGB")
-    draw = ImageDraw.Draw(img)
-
-    draw.text((label_x + 1, label_y + 1), label_text, fill=(0, 0, 0), font=font_label)
-    draw.text((label_x, label_y), label_text, fill=(255, 255, 255), font=font_label)
-
-    # Paste QR code
-    qr_x = offset_x + padding
-    qr_y = offset_y + padding + title_height + label_height + 20
-    img.paste(url_qr, (qr_x, qr_y))
-
-    # URL text below QR
-    url_text = setup_url
-    # Truncate URL if too long for display
-    max_url_length = 50
-    if len(url_text) > max_url_length:
-        url_text = url_text[:max_url_length - 3] + "..."
-    
-    url_bbox = draw.textbbox((0, 0), url_text, font=font_text)
-    url_width = url_bbox[2] - url_bbox[0]
-    url_x = offset_x + padding + (qr_size - url_width) // 2
-    url_y = qr_y + qr_size + 20
-
-    draw.text((url_x + 1, url_y + 1), url_text, fill=(0, 0, 0), font=font_text)
-    draw.text((url_x, url_y), url_text, fill=(148, 163, 184), font=font_text)  # #94a3b8
-
-    img.save(out_path, "PNG")
-
-
 async def ensure_rutracker_credentials(force: bool = False) -> None:
     """Ensure TRACKER_USERNAME and TRACKER_PASSWORD are available; if not, run the web form setup flow."""
     tracker_username = os.getenv("TRACKER_USERNAME")
@@ -1334,21 +1162,8 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
         return
     os.environ["RUTRACKER_SETUP_ACTIVE"] = "1"
 
-    # Start loading.gif first to avoid gap (before QR code screen)
-    loading_proc: subprocess.Popen | None = None
-    loading_path = _project_root() / "loading.gif"
-    if loading_path.exists():
-        try:
-            loading_proc = await _display_with_mpv(loading_path)
-            print("[init] Showing loading.gif for RuTracker setup...")
-        except Exception as e:
-            print(f"[init] Could not show loading.gif: {e}")
-
     host_ip = _detect_local_ip()
     desired_port = 8766  # Different port from main setup
-
-    mpv_proc: subprocess.Popen | None = None
-    runner: web.AppRunner | None = None
 
     async def on_credentials_saved(
         username: str, password: str, proxy: str | None = None
@@ -1499,8 +1314,10 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
         print(f"[http] RuTracker setup server listening on {host}:{actual_port}")
         return runner, actual_port
 
+    runner: web.AppRunner | None = None
+
     async def run_flow():
-        nonlocal host_ip, desired_port, runner, mpv_proc
+        nonlocal host_ip, desired_port, runner
 
         # Start server; if desired port is busy, fall back to ephemeral port 0
         try:
@@ -1514,56 +1331,6 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
 
         setup_url = f"http://{host_ip}:{bound_port}/"
         print(f"[init] RuTracker setup URL: {setup_url}")
-
-        # Prepare QR image
-        project = _project_root()
-        tmp_dir = project / ".setup"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-
-        # Generate QR code for RuTracker setup
-        qr_png = tmp_dir / "rutracker_qr.png"
-        _generate_rutracker_qr(setup_url, qr_png)
-
-        mpv_failed = False
-
-        # Try to show QR with mpv
-        try:
-            mpv_proc = await _display_with_mpv(qr_png)
-            # QR code screen is now loaded
-            await asyncio.sleep(1.5)
-
-            # Stop loading.gif after QR code screen is confirmed loaded and visible
-            if loading_proc is not None and mpv_proc.poll() is None:
-                try:
-                    loading_proc.terminate()
-                    try:
-                        await asyncio.wait_for(
-                            asyncio.to_thread(loading_proc.wait), timeout=1.0
-                        )
-                    except asyncio.TimeoutError:
-                        loading_proc.kill()
-                        await asyncio.to_thread(loading_proc.wait)
-                    print("[init] Stopped loading.gif after RuTracker QR code screen loaded")
-                except Exception as e:
-                    print(f"[init] Error stopping loading.gif: {e}")
-                    try:
-                        if loading_proc.poll() is None:
-                            loading_proc.kill()
-                    except Exception:
-                        pass
-            elif mpv_proc.poll() is not None:
-                # QR code screen already closed (user submitted form), will show loading3.gif in finally
-                print("[init] RuTracker QR code screen already closed")
-        except FileNotFoundError:
-            mpv_failed = True
-            print(
-                f"[init] mpv not found. Open this URL to configure RuTracker: {setup_url}"
-            )
-        except Exception as e:
-            mpv_failed = True
-            print(f"[init] Error displaying QR code: {e}")
-            print(f"[init] Open this URL to configure RuTracker: {setup_url}")
-        
         print(f"[init] Please open this URL in your browser to enter RuTracker credentials.")
 
         # Wait for credentials with a timeout check in background
@@ -1611,57 +1378,3 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
     except Exception as e:
         print(f"[init] Error in RuTracker setup flow: {e}")
         os.environ.pop("RUTRACKER_SETUP_ACTIVE", None)
-    finally:
-        # Stop QR code screen - show loading3.gif before closing to avoid gaps
-        if mpv_proc is not None:
-            try:
-                # Stop the initial loading.gif if it's still running
-                if loading_proc is not None and loading_proc.poll() is None:
-                    try:
-                        loading_proc.terminate()
-                        try:
-                            await asyncio.wait_for(
-                                asyncio.to_thread(loading_proc.wait), timeout=0.5
-                            )
-                        except asyncio.TimeoutError:
-                            loading_proc.kill()
-                            await asyncio.to_thread(loading_proc.wait)
-                    except Exception:
-                        pass
-                
-                # Now show loading3.gif before closing QR code screen
-                loading3_path = _project_root() / "loading3.gif"
-                if loading3_path.exists():
-                    try:
-                        loading_proc = await _display_with_mpv(loading3_path)
-                        print("[init] Started loading3.gif before closing RuTracker QR code screen")
-                        # Wait for loading3.gif to be fully visible
-                        await asyncio.sleep(1.5)
-                    except Exception as e:
-                        print(f"[init] Could not show loading3.gif: {e}")
-                
-                # Now close QR code screen (loading3.gif is already visible and covering it)
-                mpv_proc.terminate()
-                try:
-                    await asyncio.wait_for(
-                        asyncio.to_thread(mpv_proc.wait), timeout=1.0
-                    )
-                except asyncio.TimeoutError:
-                    mpv_proc.kill()
-                    await asyncio.to_thread(mpv_proc.wait)
-            except Exception as e:
-                print(f"[init] Error stopping RuTracker QR code screen: {e}")
-                try:
-                    if mpv_proc.poll() is None:
-                        mpv_proc.kill()
-                except Exception:
-                    pass
-        
-        # Don't stop init_flow's loading3.gif - let MPV player take ownership
-        # Store the process in an environment variable so MPV player can check it
-        if loading_proc is not None and loading_proc.poll() is None:
-            # Store PID so MPV player knows loading3.gif is already running
-            os.environ["MEDIA_BOT_LOADING_PID"] = str(loading_proc.pid)
-            print(
-                f"[init] Leaving loading3.gif running (PID {loading_proc.pid}) - MPV player will manage it"
-            )
