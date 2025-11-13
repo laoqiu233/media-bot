@@ -70,11 +70,11 @@ class DownloadsScreen(Screen):
                         InlineKeyboardButton("« Back to Menu", callback_data=DOWNLOADS_BACK)
                     ],
                 ]
-                # Add timestamp to force updates
+                # Add invisible zero-width space to force updates (truly hidden)
                 import time
-                timestamp_comment = f"<!-- {int(time.time() * 1000)} -->"
-                text_with_timestamp = text + timestamp_comment
-                return text_with_timestamp, InlineKeyboardMarkup(keyboard), RenderOptions()
+                invisible_char = "\u200b"  # Zero-width space
+                text_with_update = text + invisible_char
+                return text_with_update, InlineKeyboardMarkup(keyboard), RenderOptions()
 
             # Build downloads status text
             text = "📥 *Active Downloads*\n\n"
@@ -160,13 +160,13 @@ class DownloadsScreen(Screen):
                 InlineKeyboardButton("« Back to Menu", callback_data=DOWNLOADS_BACK)
             ])
 
-            # Add a timestamp comment to force updates (hidden in text)
+            # Add invisible zero-width space to force updates (truly hidden)
             # This ensures the screen always updates even if progress numbers are the same
             import time
-            timestamp_comment = f"<!-- {int(time.time() * 1000)} -->"
-            text_with_timestamp = text + timestamp_comment
-            
-            return text_with_timestamp, InlineKeyboardMarkup(keyboard), RenderOptions()
+            # Use zero-width space with timestamp to ensure uniqueness
+            invisible_char = "\u200b" * (int(time.time() * 100) % 10 + 1)  # Variable number for uniqueness
+            text_with_update = text + invisible_char
+            return text_with_update, InlineKeyboardMarkup(keyboard), RenderOptions()
 
         except Exception as e:
             logger.error(f"Error rendering downloads: {e}")

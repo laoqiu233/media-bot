@@ -1016,7 +1016,11 @@ class MPVController:
                     logger.info(f"Detected {len(active_tasks)} active download(s), showing progress on TV")
                     # Always show progress if there are active downloads (even if process is running)
                     # This handles the case where loading3.gif is showing but downloads just started
-                    await self._show_download_progress()
+                    if not self._showing_download_progress:
+                        # Only call if we're not already showing progress (avoid duplicate calls)
+                        success = await self._show_download_progress()
+                        if not success:
+                            logger.warning("Failed to show download progress on TV")
                 else:
                     # No active downloads, make sure we're showing loading3.gif
                     if self._loading_proc is None or self._loading_proc.poll() is not None:
@@ -1277,21 +1281,26 @@ class MPVController:
             True if progress was displayed, False if no active downloads
         """
         if self._downloader is None:
+            logger.warning("Downloader is None, cannot show download progress")
             return False
         
         try:
             tasks = await self._downloader.get_all_tasks()
+            logger.debug(f"_show_download_progress: Got {len(tasks)} total tasks")
             # Filter active downloads (downloading, checking, or queued)
             active_statuses = ["downloading", "checking", "queued"]
             active_tasks = [t for t in tasks if t.status.value in active_statuses]
             
+            logger.debug(f"_show_download_progress: Found {len(active_tasks)} active tasks")
             if not active_tasks:
+                logger.debug("No active tasks, returning False")
                 return False
             
             # If we're already showing download progress, the update task will handle it
             # But if we're showing loading3.gif, we need to switch to progress
             if self._showing_download_progress:
                 # Already showing progress, update task will refresh it
+                logger.debug("Already showing download progress, update task will handle refresh")
                 return True
             
             # Generate progress image
@@ -1304,12 +1313,15 @@ class MPVController:
             
             # Use the same MPV player instance to display image (no new process)
             if self._player is None:
-                logger.warning("MPV player not initialized, cannot show download progress")
+                logger.error("MPV player not initialized, cannot show download progress")
                 return False
+            
+            logger.info(f"Showing download progress for {len(active_tasks)} task(s) on TV")
             
             try:
                 # Stop any legacy subprocess if running
                 if self._loading_proc is not None and self._loading_proc.poll() is None:
+                    logger.debug("Stopping legacy loading process")
                     try:
                         self._loading_proc.terminate()
                         await asyncio.wait_for(asyncio.to_thread(self._loading_proc.wait), timeout=0.5)
@@ -1321,6 +1333,13 @@ class MPVController:
                             pass
                     self._loading_proc = None
                 
+                # Verify image file exists
+                if not progress_png.exists():
+                    logger.error(f"Progress image file not found: {progress_png}")
+                    return False
+                
+                logger.debug(f"Configuring MPV for image display: {progress_png}")
+                
                 # Configure MPV for image display
                 self._player.loop_file = "inf"
                 self._player.keepaspect = False
@@ -1328,6 +1347,7 @@ class MPVController:
                 self._player.fullscreen = True
                 
                 # Load the image file
+                logger.debug(f"Loading image file in MPV: {progress_png}")
                 self._player.loadfile(str(progress_png))
                 
                 # Mark that we're showing an image
@@ -1336,6 +1356,7 @@ class MPVController:
                 
                 # Wait briefly for image to load
                 await asyncio.sleep(0.3)
+                logger.info("Download progress image loaded in MPV")
                 
             except Exception as e:
                 logger.error(f"Error loading progress image in MPV: {e}", exc_info=True)
