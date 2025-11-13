@@ -114,12 +114,40 @@ class MPVController:
                 # Save watch progress before cleaning up
                 current_file = self._current_file
                 
-                self._is_playing = False
-                self._current_file = None
+                # When switching files, loadfile() triggers end-file for the old file.
+                # In play(), we set _current_file to the new file BEFORE calling loadfile(),
+                # so if _current_file is still set when end-file fires, it means we're switching
+                # to a new file, not actually ending playback. In that case, don't clear the state.
+                # The file-loaded event will handle setting _is_playing = True for the new file.
+                event_reason = getattr(event, "reason", None)
+                
+                # Only clear playing state if this is a real end (eof/stop) AND no new file is loading
+                # If reason is "redirect", it's definitely a file switch, so don't clear
+                if event_reason == "redirect":
+                    # File switch - don't clear state, let file-loaded event handle it
+                    logger.debug("File switch detected (redirect), keeping playing state")
+                elif current_file is None or event_reason in ("eof", "stop"):
+                    # Real end of playback - clear state
+                    self._is_playing = False
+                    self._current_file = None
+                    logger.debug("Playback ended, cleared playing state")
+                else:
+                    # Unknown case - be conservative and don't clear if _current_file is set
+                    # (likely a file switch)
+                    logger.debug(f"End-file event with reason={event_reason}, current_file={current_file}, keeping state")
+                
                 self._trigger_event("playback_finished", event)
 
-                # Resume all downloads when playback ends
+                # Resume all downloads when playback ends (only if not switching files)
                 async def save_progress_resume_downloads_and_show_loading():
+                    # Check if we're switching files - if _current_file is still set, we're switching
+                    # Don't resume downloads or show loading.gif if switching
+                    is_switching = self._current_file is not None and self._current_file != current_file
+                    
+                    if is_switching:
+                        logger.debug("File switch detected, skipping download resume and loading.gif")
+                        return
+                    
                     # Save watch progress first
                     if (
                         self._watch_progress_manager is not None
