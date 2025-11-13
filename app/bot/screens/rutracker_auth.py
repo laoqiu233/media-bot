@@ -327,13 +327,13 @@ async def _stop_loading3_gif() -> None:
     Checks for MEDIA_BOT_LOADING_PID environment variable and stops the process.
     """
     loading_pid_str = os.environ.get("MEDIA_BOT_LOADING_PID")
-    print(loading_pid_str)
+    logger.info(loading_pid_str)
     if not loading_pid_str:
         return
     
     try:
         loading_pid = int(loading_pid_str)
-        print(loading_pid)
+        logger.info(loading_pid)
 
         # Check if process is still running
         try:
@@ -576,16 +576,6 @@ class RuTrackerAuthScreen(Screen):
                 
                 
                 project_root = _project_root()
-                
-                # Show loading.gif first (like init_flow does)
-                loading_path = project_root / "loading.gif"
-                if loading_path.exists():
-                    # Start mpv with loading.gif (or load it if mpv is already running)
-                    self._mpv_proc, self._mpv_ipc_socket = await _display_with_mpv(
-                        loading_path, self._shared_socket, self._mpv_proc
-                    )
-                    logger.info("Showing loading.gif before QR code...")
-                    await asyncio.sleep(0.5)  # Brief pause
                 
                 # Prepare QR code image path
                 tmp_dir = project_root / ".setup"
