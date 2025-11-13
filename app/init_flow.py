@@ -1221,6 +1221,7 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
         async def handle_index(_request: web.Request) -> web.Response:
             # Read credentials from .env file to ensure we have the latest values
             env_tracker_username = tracker_username or ""
+            env_tracker_password = tracker_password or ""
             env_tracker_proxy = os.getenv("TRACKER_PROXY", "")
             
             env_path = _project_root() / ".env"
@@ -1229,6 +1230,8 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
                 for line in content.splitlines():
                     if line.startswith("TRACKER_USERNAME="):
                         env_tracker_username = line.split("=", 1)[1].strip()
+                    elif line.startswith("TRACKER_PASSWORD="):
+                        env_tracker_password = line.split("=", 1)[1].strip()
                     elif line.startswith("TRACKER_PROXY="):
                         env_tracker_proxy = line.split("=", 1)[1].strip()
             
@@ -1236,7 +1239,7 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
                 "rutracker_setup.html",
                 ERROR_BOX="",
                 TRACKER_USERNAME=env_tracker_username,
-                TRACKER_PASSWORD="",
+                TRACKER_PASSWORD=env_tracker_password,
                 TRACKER_PROXY=env_tracker_proxy,
             )
             return web.Response(text=html, content_type="text/html")
