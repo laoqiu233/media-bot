@@ -260,7 +260,7 @@ class TorrentSearcher:
             async with AsyncRuTrackerClient(
                 username,
                 password,
-                self.config.tracker.proxy or "",
+                proxy or "",
             ) as client:
                 raw_results = await client.search_all_pages(search_query)
 
