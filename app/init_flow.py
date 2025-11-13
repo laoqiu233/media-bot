@@ -759,6 +759,38 @@ def _append_or_replace_env_line(lines: list[str], key: str, value: str) -> list[
     return new_lines
 
 
+def _remove_env_line(lines: list[str], key: str) -> list[str]:
+    """Remove a line from .env file content that starts with key=.
+    
+    Args:
+        lines: List of lines from .env file
+        key: The environment variable key to remove
+        
+    Returns:
+        New list of lines with the key removed
+    """
+    new_lines: list[str] = []
+    for line in lines:
+        if not line.startswith(f"{key}="):
+            new_lines.append(line)
+    return new_lines
+
+
+def remove_telegram_token_from_env() -> None:
+    """Remove TELEGRAM_BOT_TOKEN from .env file.
+    
+    This is useful when the bot token is in conflict (another instance is running).
+    """
+    env_path = _project_root() / ".env"
+    if env_path.exists():
+        content = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+        new_content = _remove_env_line(content, "TELEGRAM_BOT_TOKEN")
+        env_path.write_text("".join(new_content), encoding="utf-8")
+        # Also remove from os.environ
+        os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+        print("[init] Removed TELEGRAM_BOT_TOKEN from .env")
+
+
 async def ensure_telegram_token(force: bool = False) -> None:
     """Ensure TELEGRAM_BOT_TOKEN is available; if not, run the QR+form setup flow."""
     if os.getenv("TELEGRAM_BOT_TOKEN") and not force:

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 
+from telegram import error as telegram_error
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from app.bot.auth import init_auth
@@ -10,6 +11,7 @@ from app.bot.handlers import BotHandlers
 from app.bot.screen_registry import ScreenRegistry
 from app.bot.session_manager import SessionManager
 from app.config import load_config
+from app.init_flow import ensure_telegram_token, remove_telegram_token_from_env
 from app.library.imdb_client import IMDbClient
 from app.library.manager import LibraryManager
 from app.player.mpv_controller import player
@@ -151,34 +153,48 @@ def run_integrated_bot():
             # Create Telegram application
             application = Application.builder().token(config.telegram.bot_token).build()
 
-            # Initialize the application to get the bot instance
-            await application.initialize()
+            # Initialize and start the bot - catch Conflict errors
+            try:
+                # Initialize the application to get the bot instance
+                await application.initialize()
 
-            # Create session manager and handlers with the bot instance
-            session_manager = SessionManager(application.bot, screen_registry)
-            handlers = BotHandlers(
-                session_manager=session_manager,
-                auth_manager=auth_manager,
-            )
-
-            # Register handlers
-            # Handle /start separately (don't delete it to avoid Telegram resending)
-            application.add_handler(CommandHandler("start", handlers.handle_start_command))
-
-            # Handle all other text messages including commands
-            application.add_handler(
-                MessageHandler(
-                    filters.TEXT,  # Accept all text including commands
-                    handlers.handle_text_message,
+                # Create session manager and handlers with the bot instance
+                session_manager = SessionManager(application.bot, screen_registry)
+                handlers = BotHandlers(
+                    session_manager=session_manager,
+                    auth_manager=auth_manager,
                 )
-            )
 
-            # Handle all callback queries (button clicks)
-            application.add_handler(CallbackQueryHandler(handlers.handle_callback))
+                # Register handlers
+                # Handle /start separately (don't delete it to avoid Telegram resending)
+                application.add_handler(CommandHandler("start", handlers.handle_start_command))
 
-            # Start the bot (already initialized above)
-            await application.start()
-            await application.updater.start_polling()
+                # Handle all other text messages including commands
+                application.add_handler(
+                    MessageHandler(
+                        filters.TEXT,  # Accept all text including commands
+                        handlers.handle_text_message,
+                    )
+                )
+
+                # Handle all callback queries (button clicks)
+                application.add_handler(CallbackQueryHandler(handlers.handle_callback))
+
+                # Start the bot (already initialized above)
+                await application.start()
+                await application.updater.start_polling()
+            except telegram_error.Conflict as e:
+                # Another bot instance is running - remove token and run init_flow
+                logger.error(
+                    f"Bot conflict detected: {e}. "
+                    "Another instance is using this bot token. "
+                    "Removing token from .env and running setup flow..."
+                )
+                remove_telegram_token_from_env()
+                logger.info("Running init_flow to configure new bot token...")
+                await ensure_telegram_token(force=True)
+                logger.info("Setup complete. Please restart the bot.")
+                return
 
             # Keep the bot running
             try:
