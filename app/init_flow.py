@@ -1180,13 +1180,16 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
             new_lines = _append_or_replace_env_line(new_lines, "TRACKER_PASSWORD", password)
             
             # Save proxy if provided, otherwise remove it if it exists
-            if proxy and proxy.strip():
-                new_lines = _append_or_replace_env_line(new_lines, "TRACKER_PROXY", proxy.strip())
-                os.environ["TRACKER_PROXY"] = proxy.strip()
+            if proxy is not None and proxy:
+                proxy_value = proxy
+                new_lines = _append_or_replace_env_line(new_lines, "TRACKER_PROXY", proxy_value)
+                os.environ["TRACKER_PROXY"] = proxy_value
+                print(f"[init] Saved TRACKER_PROXY: {proxy_value}")
             else:
                 # Remove TRACKER_PROXY if it exists
                 new_lines = _remove_env_line(new_lines, "TRACKER_PROXY")
                 os.environ.pop("TRACKER_PROXY", None)
+                print("[init] Removed TRACKER_PROXY (empty or not provided)")
             
             env_path.write_text("".join(new_lines), encoding="utf-8")
 
@@ -1229,11 +1232,11 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
                 content = env_path.read_text(encoding="utf-8")
                 for line in content.splitlines():
                     if line.startswith("TRACKER_USERNAME="):
-                        env_tracker_username = line.split("=", 1)[1].strip()
+                        env_tracker_username = line.split("=", 1)[1]
                     elif line.startswith("TRACKER_PASSWORD="):
-                        env_tracker_password = line.split("=", 1)[1].strip()
+                        env_tracker_password = line.split("=", 1)[1]
                     elif line.startswith("TRACKER_PROXY="):
-                        env_tracker_proxy = line.split("=", 1)[1].strip()
+                        env_tracker_proxy = line.split("=", 1)[1]
             
             html = _render_template(
                 "rutracker_setup.html",
@@ -1253,9 +1256,9 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
             import html as html_module
 
             data = await request.post()
-            username = (data.get("tracker_username") or "").strip()
-            password = (data.get("tracker_password") or "").strip()
-            proxy = (data.get("tracker_proxy") or "").strip()
+            username = (data.get("tracker_username") or "")
+            password = (data.get("tracker_password") or "")
+            proxy = (data.get("tracker_proxy") or "")
 
             # Validate input
             if not username or not password:
@@ -1270,8 +1273,11 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
                 return web.Response(text=html_content, content_type="text/html", status=400)
 
             # Save credentials (proxy is optional)
+            # Pass proxy as-is if it's not empty, otherwise pass None
+            proxy_value = proxy if proxy else None
+            print(f"[init] Saving RuTracker credentials - username: {username[:10]}..., proxy: {proxy_value}")
             success, error_msg = await on_credentials_saved(
-                username, password, proxy if proxy else None
+                username, password, proxy_value
             )
 
             if success:
@@ -1343,11 +1349,11 @@ async def ensure_rutracker_credentials(force: bool = False) -> None:
                     content = env_path.read_text(encoding="utf-8")
                     for line in content.splitlines():
                         if line.startswith("TRACKER_USERNAME="):
-                            os.environ["TRACKER_USERNAME"] = line.split("=", 1)[1].strip()
+                            os.environ["TRACKER_USERNAME"] = line.split("=", 1)[1]
                         elif line.startswith("TRACKER_PASSWORD="):
-                            os.environ["TRACKER_PASSWORD"] = line.split("=", 1)[1].strip()
+                            os.environ["TRACKER_PASSWORD"] = line.split("=", 1)[1]
                         elif line.startswith("TRACKER_PROXY="):
-                            os.environ["TRACKER_PROXY"] = line.split("=", 1)[1].strip()
+                            os.environ["TRACKER_PROXY"] = line.split("=", 1)[1]
                 if os.getenv("TRACKER_USERNAME") and os.getenv("TRACKER_PASSWORD"):
                     print("[init] RuTracker credentials saved, cleaning up server...")
                     try:
