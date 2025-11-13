@@ -39,6 +39,7 @@ class MPVController:
             self._background_tasks: set[asyncio.Task] = set()  # Keep track of background tasks
             self._event_loop: asyncio.AbstractEventLoop | None = None  # Store event loop reference
             self._downloader: Any | None = None  # Torrent downloader reference for pause/resume
+            self._watch_progress_manager: Any | None = None  # Watch progress manager
             self._initialized = True
 
     def initialize(
@@ -48,6 +49,7 @@ class MPVController:
         hwdec: str = "auto",
         fullscreen: bool = True,
         downloader: Any | None = None,
+        watch_progress_manager: Any | None = None,
     ):
         """Initialize the MPV player with configuration.
 
@@ -57,8 +59,10 @@ class MPVController:
             fullscreen: Start in fullscreen mode
             hwdec: Hardware decoding mode
             downloader: Optional torrent downloader instance for auto-pause/resume
+            watch_progress_manager: Optional watch progress manager for resume functionality
         """
         self._downloader = downloader
+        self._watch_progress_manager = watch_progress_manager
         if mpv is None:
             raise RuntimeError(
                 "python-mpv is not installed. Please install it: pip install python-mpv"
@@ -107,13 +111,38 @@ class MPVController:
 
             @self._player.event_callback("end-file")
             def end_file_callback(event):
+                # Save watch progress before cleaning up
+                current_file = self._current_file
+                
                 self._is_playing = False
                 self._current_file = None
                 self._trigger_event("playback_finished", event)
 
                 # Resume all downloads when playback ends
-                async def resume_downloads_and_show_loading():
-                    # Resume downloads first
+                async def save_progress_resume_downloads_and_show_loading():
+                    # Save watch progress first
+                    if (
+                        self._watch_progress_manager is not None
+                        and current_file is not None
+                    ):
+                        try:
+                            # Get final position and duration
+                            position = self._player.time_pos if self._player else None
+                            duration = self._player.duration if self._player else None
+                            
+                            if position is not None and duration is not None:
+                                await self._watch_progress_manager.update_progress(
+                                    file_path=current_file,
+                                    position=position,
+                                    duration=duration,
+                                )
+                                logger.info(
+                                    f"Saved watch progress: {current_file.name} at {int(position)}s"
+                                )
+                        except Exception as e:
+                            logger.error(f"Error saving watch progress: {e}")
+                    
+                    # Resume downloads
                     if self._downloader is not None:
                         try:
                             resumed_count = await self._downloader.resume_all_downloads()
@@ -133,7 +162,7 @@ class MPVController:
                 if loop and loop.is_running():
                     # Use run_coroutine_threadsafe to schedule from MPV's callback thread
                     future = asyncio.run_coroutine_threadsafe(
-                        resume_downloads_and_show_loading(), loop
+                        save_progress_resume_downloads_and_show_loading(), loop
                     )
                     # Store future to prevent garbage collection
                     # Note: We don't need to await it, it's fire-and-forget
@@ -198,7 +227,7 @@ class MPVController:
                 logger.error(f"Error shutting down MPV player: {e}")
 
     async def play(self, file_path: Path) -> bool:
-        """Play a video file.
+        """Play a video file with optional resume from saved progress.
 
         Args:
             file_path: Path to the video file
@@ -222,6 +251,20 @@ class MPVController:
             async with self._lock:
                 logger.info(f"Starting playback of: {file_path}")
                 logger.info(f"File size: {file_path.stat().st_size / (1024*1024):.2f} MB")
+
+                # Check for saved watch progress
+                resume_position = None
+                if self._watch_progress_manager is not None:
+                    try:
+                        progress = await self._watch_progress_manager.get_progress(file_path)
+                        if progress and progress.should_resume:
+                            resume_position = progress.position
+                            logger.info(
+                                f"Found saved progress: {progress.progress_percentage:.1f}% "
+                                f"({int(resume_position)}s / {int(progress.duration)}s)"
+                            )
+                    except Exception as e:
+                        logger.error(f"Error checking watch progress: {e}")
 
                 # Pause all downloads when playback starts
                 if self._downloader is not None:
@@ -259,6 +302,14 @@ class MPVController:
                     except Exception:
                         pass
 
+                # Resume from saved position if available
+                if resume_position is not None and video_loaded:
+                    try:
+                        self._player.seek(resume_position, "absolute")
+                        logger.info(f"▶️  Resumed playback from {int(resume_position)}s")
+                    except Exception as e:
+                        logger.error(f"Error seeking to resume position: {e}")
+
                 # Only stop loading.gif AFTER video is confirmed loaded and visible
                 # Wait 1.5 seconds to ensure video is fully rendered and visible before stopping GIF
                 if video_loaded:
@@ -280,6 +331,8 @@ class MPVController:
                     if self._player.time_pos is not None or self._player.duration is not None:
                         logger.info(f"✅ Playback started successfully: {file_path.name}")
                         logger.info(f"   Duration: {self._player.duration}s")
+                        if resume_position is not None:
+                            logger.info(f"   Resumed from: {int(resume_position)}s")
                     else:
                         logger.warning("⚠️  File loaded but playback status unknown")
                         logger.warning(
@@ -348,7 +401,7 @@ class MPVController:
             return False
 
     async def stop(self) -> bool:
-        """Stop playback.
+        """Stop playback and save watch progress.
 
         Returns:
             True if successful
@@ -357,6 +410,28 @@ class MPVController:
             return False
 
         try:
+            # Save watch progress before stopping
+            if (
+                self._watch_progress_manager is not None
+                and self._current_file is not None
+            ):
+                try:
+                    position = self._player.time_pos
+                    duration = self._player.duration
+                    
+                    if position is not None and duration is not None:
+                        await self._watch_progress_manager.update_progress(
+                            file_path=self._current_file,
+                            position=position,
+                            duration=duration,
+                        )
+                        logger.info(
+                            f"Saved watch progress on stop: {self._current_file.name} "
+                            f"at {int(position)}s"
+                        )
+                except Exception as e:
+                    logger.error(f"Error saving watch progress on stop: {e}")
+
             await self._show_loading_gif()
             await asyncio.sleep(3)
             logger.info("Gif started")
@@ -405,6 +480,8 @@ class MPVController:
 
             if relative:
                 curr = await self.get_position()
+                if curr is None:
+                    curr = 0.0
                 res = curr + seconds
                 self._player.seek(res, "absolute")
                 self._player.seek(res, "absolute")  # evil double seek to screw with the haters

@@ -17,6 +17,7 @@ from app.library.manager import LibraryManager
 from app.player.mpv_controller import player
 from app.scheduler.series_scheduler import get_scheduler
 from app.scheduler.series_updater import SeriesUpdater
+from app.scheduler.watch_progress import get_watch_progress_manager
 from app.torrent.downloader import DownloadState, TorrentDownloader
 from app.torrent.importer import TorrentImporter
 from app.torrent.searcher import TorrentSearcher
@@ -125,6 +126,25 @@ async def initialize_components():
     await series_scheduler.load_progress()
     logger.info("Series scheduler initialized")
 
+    # Initialize watch progress manager
+    watch_progress_mgr = get_watch_progress_manager(data_dir)
+    await watch_progress_mgr.load_progress()
+    logger.info("Watch progress manager initialized")
+
+    # Re-initialize MPV with watch progress manager
+    try:
+        mpv_controller.initialize(
+            vo=config.mpv.vo,
+            ao=config.mpv.ao,
+            fullscreen=config.mpv.fullscreen,
+            hwdec=config.mpv.hwdec,
+            downloader=torrent_downloader,
+            watch_progress_manager=watch_progress_mgr,
+        )
+        logger.info("MPV player re-initialized with watch progress manager")
+    except Exception as e:
+        logger.warning(f"MPV re-initialization failed: {e}")
+
     screen_registry = ScreenRegistry(
         library_manager,
         mpv_controller,
@@ -143,6 +163,7 @@ async def initialize_components():
         torrent_downloader,
         mpv_controller,
         series_scheduler,
+        watch_progress_mgr,
     )
 
 
@@ -160,6 +181,7 @@ def run_integrated_bot():
         downloader = None
         player_controller = None
         scheduler = None
+        watch_progress = None
         series_updater = None
 
         try:
@@ -171,6 +193,7 @@ def run_integrated_bot():
                 downloader,
                 player_controller,
                 scheduler,
+                watch_progress,
             ) = await initialize_components()
 
             # Create Telegram application
@@ -242,6 +265,8 @@ def run_integrated_bot():
                 player_controller.shutdown()
             if scheduler:
                 await scheduler.save_progress()
+            if watch_progress:
+                await watch_progress.save_progress()
             if series_updater:
                 series_updater.stop()
             logger.info("Shutdown complete")
