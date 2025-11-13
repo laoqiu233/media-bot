@@ -12,6 +12,8 @@ from py_rutracker import AsyncRuTrackerClient
 from app.config import Config
 from app.library.models import DownloadIMDbMetadata, VideoQuality
 
+import os
+
 logger = logging.getLogger(__name__)
 
 
@@ -45,13 +47,17 @@ class RuTrackerTorrentSearchResult(TorrentSearchResult):
         if self.torrent_file_link is None:
             raise ValueError("Torrent file link is not set")
 
-        if self.config.tracker.username is None or self.config.tracker.password is None:
+        username = self.config.tracker.username or os.getenv("RUTRACKER_USERNAME")
+        password = self.config.tracker.password or os.getenv("RUTRACKER_PASSWORD")
+        proxy = self.config.tracker.proxy or os.getenv("RUTRACKER_PROXY")
+
+        if username is None or password is None:
             raise ValueError("RuTracker credentials are not set")
 
         async with AsyncRuTrackerClient(
-            self.config.tracker.username,
-            self.config.tracker.password,
-            self.config.tracker.proxy or "",
+            username,
+            password,
+            proxy or ""
         ) as client:
             content = await client.download(self.torrent_file_link)
             temp_dir = Path("/tmp")
